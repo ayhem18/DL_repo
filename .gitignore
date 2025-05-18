@@ -6,3 +6,27 @@
 /adaptiveUnet/_data/**
 
 .vscode
+
+# model weights
+*.pth
+*.pt
+
+# images
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.tiff
+*.webp  
+
+# logs
+*.log
+*.txt
+*.csv
+*.json
+*.yaml
+*.yml 
+
+# tensorboard logs
+*.tfevents*
