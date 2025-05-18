@@ -1,12 +1,11 @@
 import os
+import shutil
 
-import numpy as np
 
 from PIL import Image
 from pathlib import Path
 
 from mypt.code_utils import directories_and_files as dirf
-
 
 current_dir = Path(__file__).parent
 
@@ -15,69 +14,6 @@ while 'data' not in os.listdir(current_dir):
 
 DATA_DIR = os.path.join(current_dir, 'data') 
 
-
-def build_class_mapping(annotation_file_path):
-    """
-    Build a dictionary mapping filenames to their class labels by reading an annotation file.
-    
-    Args:
-        annotation_file_path (str): Path to the annotation file (e.g., trainval.txt or test.txt)
-        
-    Returns:
-        dict: Dictionary mapping filenames to their class labels (the second number in each line)
-    """
-    class_mapping = {}
-    
-    try:
-        with open(annotation_file_path, 'r') as f:
-            for line in f:
-                line = line.strip()
-                if not line:  # Skip empty lines
-                    continue
-                    
-                parts = line.split()
-                if len(parts) >= 3:  # Ensure we have at least filename and class label
-                    filename = parts[0]
-                    class_label = int(parts[2])  # The second number is the class label
-                    class_mapping[filename] = class_label
-
-    except Exception as e:
-        print(f"Error reading annotation file {annotation_file_path}: {e}")
-    
-    return class_mapping
-
-
-def get_unique_image_shapes(folder_path):
-    """
-    Read all images in a folder and return their unique shapes.
-    
-    Args:
-        folder_path (str): Path to the folder containing images
-        
-    Returns:
-        set: Set of tuples containing unique image shapes (height, width)
-    """
-    unique_shapes = set()
-    
-    try:
-        for filename in os.listdir(folder_path):
-            # Skip hidden files
-            if filename.startswith('.'):
-                continue
-                
-            image_path = os.path.join(folder_path, filename)
-            
-            try:
-                unique_shapes.add(Image.open(image_path).size)
-            except Exception as e:
-                print(f"Error reading {filename}: {e}")
-                continue
-                
-        return unique_shapes
-        
-    except Exception as e:
-        print(f"Error accessing folder {folder_path}: {e}")
-        return set()
 
 
 def read_gif(gif_path):
@@ -105,10 +41,6 @@ def read_gif(gif_path):
         print(f"Error reading GIF {gif_path}: {e}")
         return []
 
-
-from mypt.code_utils import directories_and_files as dirf
-
-import shutil
 
 def prepare_data():
     original_dir = os.path.join(DATA_DIR, 'original')
@@ -178,6 +110,7 @@ def prepare_data():
 
     assert set(train_files) & set(val_files) == set(), "There are some files that are in both the train and the val set"
     
+
 
 if __name__ == '__main__':
     prepare_data()
