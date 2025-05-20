@@ -31,13 +31,13 @@ DATA_DIR = os.path.join(current_dir, 'data')
 
 @dataclass
 class TrainConfig:
-    train_batch_size: int = 32
+    train_batch_size: int = 200
     val_batch_size: int = 64
-    num_epochs: int = 2
+    num_epochs: int = 50
     learning_rate: float = 1e-4
     
-    input_shape: Tuple[int, int, int] = (3, 200, 200)
-    output_shape: Tuple[int, int, int] = (3, 200, 200)
+    input_shape: Tuple[int, int, int] = (3, 400, 400)
+    output_shape: Tuple[int, int, int] = (3, 400, 400)
 
     bottleneck_shape: Tuple[int, int, int] = (128, 32, 32)
     bottleneck_out_channels: int = 256
