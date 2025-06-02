@@ -1,6 +1,4 @@
 import os
-import json
-import numpy as np
 import torch
 import shutil
 
@@ -8,18 +6,21 @@ import albumentations as A
 
 
 from pathlib import Path
-from typing import List, Optional, Tuple
-from dataclasses import dataclass, asdict
+from typing import Optional, Tuple, Union
 from torch.utils.tensorboard import SummaryWriter
+from torch.utils.data import DataLoader, Dataset
 
-import mypt.code_utils.pytorch_utils as pu
 
+from mypt.shortcuts import P
 from mypt.code_utils import directories_and_files as dirf
-from mypt.nets.conv_nets.adaptive_unet import AdaptiveUNet
+from mypt.nets.conv_nets.adaptive_unet.adaptive_unet import AdaptiveUNet
+from mypt.sanity_checks.loss_functions.bce import dataset_sanity_check
 from mypt.data.datasets.segmentation.semantic_seg import SemanticSegmentationDS
 from mypt.data.dataloaders.standard_dataloaders import initialize_train_dataloader, initialize_val_dataloader
 
+
 from train import train_model
+from config import TrainConfig
 
 SCRIPT_DIR = Path(__file__).parent
 current_dir = SCRIPT_DIR
@@ -29,52 +30,10 @@ while 'data' not in os.listdir(current_dir):
 DATA_DIR = os.path.join(current_dir, 'data') 
 
 
-@dataclass
-class TrainConfig:
-    train_batch_size: int = 32
-    val_batch_size: int = 64
-    num_epochs: int = 2
-    learning_rate: float = 1e-4
-    
-    input_shape: Tuple[int, int, int] = (3, 200, 200)
-    output_shape: Tuple[int, int, int] = (3, 200, 200)
-
-    bottleneck_shape: Tuple[int, int, int] = (128, 32, 32)
-    bottleneck_out_channels: int = 256
-    
-    seed: int = 42
-
-    def save(self, filepath: str) -> None:
-        """Save the config to a JSON file"""
-        # Convert the config to a dictionary
-        config_dict = asdict(self)
-        
-        # Convert tuples to lists for JSON serialization
-        for key, value in config_dict.items():
-            if isinstance(value, tuple):
-                config_dict[key] = list(value)
-        
-        # Save to JSON file
-        with open(filepath, 'w') as f:
-            json.dump(config_dict, f, indent=4)
-
-    @classmethod
-    def load(cls, filepath: str) -> 'TrainConfig':
-        """Load the config from a JSON file"""
-        with open(filepath, 'r') as f:
-            config_dict = json.load(f)
-        
-        # Convert lists back to tuples
-        for key, value in config_dict.items():
-            if isinstance(value, list):
-                config_dict[key] = tuple(value)
-        
-        # Create a new instance of TrainConfig with the loaded values
-        return cls(**config_dict)
 
 
-
-def _set_data(config: TrainConfig):
+def _set_data(config: TrainConfig, return_datasets: bool = False) -> Union[Tuple[DataLoader, DataLoader], 
+                                                                           Tuple[DataLoader, DataLoader, Dataset, Dataset]]:
     train_data = os.path.join(DATA_DIR, 'working_version', 'train')
     train_masks = os.path.join(DATA_DIR, 'working_version', 'train_masks')
 
@@ -116,36 +75,35 @@ def _set_data(config: TrainConfig):
     train_loader = initialize_train_dataloader(train_dataset, seed=42, batch_size=config.train_batch_size, num_workers=2, drop_last=True)
     val_loader = initialize_val_dataloader(val_dataset, seed=42, batch_size=config.val_batch_size, num_workers=2)
 
+    if return_datasets:
+        return train_loader, val_loader, train_dataset, val_dataset
+
     return train_loader, val_loader
 
 
 
 
-def visualize_data(images: List):
-    import cv2
-    for i, img in enumerate(images):
-        if isinstance(img, torch.Tensor):
-            img = img.transpose(0, 2, 3).cpu().numpy()
-        
-        img = img * 255.0
-        img = img.astype(np.uint8)
+def prepare_log_directory() -> P:
+    logs_dir = dirf.process_path(os.path.join(SCRIPT_DIR, 'runs'), dir_ok=True, file_ok=False)
 
-        cv2.imshow('image', img)
-        cv2.waitKey(0)
-        cv2.destroyAllWindows()
+    # iterate through each "run_*" directory and remove any folder that does not contain a '.json' file
+    for r in os.listdir(logs_dir):
+        run_dir = False
+        if os.path.isdir(os.path.join(logs_dir, r)):
+            for file in os.listdir(os.path.join(logs_dir, r)):
+                if os.path.splitext(file)[-1] == '.json':
+                    run_dir = True
+                    break
+            
+            if not run_dir:
+                shutil.rmtree(os.path.join(logs_dir, r))
 
-
-
-
-def sanity_check():
-    config = TrainConfig()
-    train_loader, _ = _set_data(config)
-
-    for img, mask in train_loader:
-        visualize_data([img, mask])
+    exp_log_dir = dirf.process_path(os.path.join(logs_dir, f'run_{len(os.listdir(logs_dir)) + 1}'), dir_ok=True, file_ok=False)
+    return exp_log_dir
 
 
-def main(checkpoint_path: Optional[str]=None):
+
+def set_model(checkpoint_path: Optional[str]=None) -> Tuple[AdaptiveUNet, TrainConfig]:
     # Set device
     if checkpoint_path is not None:
         # find the path to the model
@@ -178,37 +136,34 @@ def main(checkpoint_path: Optional[str]=None):
     model.build_expanding_path(max_conv_layers_per_block=5, min_conv_layers_per_block=1)
     model.build()
 
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")   
-    train_loader, val_loader = _set_data(config)    
-
     if checkpoint_path is not None:
         model.load_state_dict(torch.load(model_path))
 
-    # Move model to device
-    model = model.to(device)
+    return model, config
+
+
+
+def main(checkpoint_path: Optional[str]=None, sanity_check: bool = False):
+
+    model, config = set_model(checkpoint_path=checkpoint_path)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")   
     
+    if sanity_check:
+        train_loader, val_loader, train_dataset, val_dataset = _set_data(config, return_datasets=True)
+        dataset_sanity_check(train_dataset, lambda x: x[1])
+        dataset_sanity_check(val_dataset, lambda x: x[1])
+
+    else:
+        train_loader, val_loader = _set_data(config)    
+
     # Define loss function and optimizer
     criterion = torch.nn.BCEWithLogitsLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
 
-    logs_dir = dirf.process_path(os.path.join(SCRIPT_DIR, 'runs'), dir_ok=True, file_ok=False)
-
-    # iterate through each "run_*" directory and remove any folder that does not contain a '.json' file
-    for r in os.listdir(logs_dir):
-        run_dir = False
-        if os.path.isdir(os.path.join(logs_dir, r)):
-            for file in os.listdir(os.path.join(logs_dir, r)):
-                if os.path.splitext(file)[-1] == '.json':
-                    run_dir = True
-                    break
-            
-            if not run_dir:
-                shutil.rmtree(os.path.join(logs_dir, r))
-
-    exp_log_dir = dirf.process_path(os.path.join(logs_dir, f'run_{len(os.listdir(logs_dir)) + 1}'), dir_ok=True, file_ok=False)
 
     # Initialize TensorBoard writer
+    exp_log_dir = prepare_log_directory()
     writer = SummaryWriter(os.path.join(exp_log_dir, 'logs'))
     
     # Train the model
