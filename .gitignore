@@ -30,3 +30,13 @@
 
 # tensorboard logs
 *.tfevents*
+
+# dataset
+diffusers/dataset/
+
+# runs
+diffusers/runs/
+
+# samples
+diffusers/samples/
+

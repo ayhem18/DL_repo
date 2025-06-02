@@ -60,7 +60,7 @@ def train_loop(model: torch.nn.Module,
         batch_losses[batch_idx] = batch_loss
         
         # Update statistics
-        train_loss += batch_loss * images.size(0)
+        train_loss += batch_loss
         train_loop.set_postfix(loss=batch_loss)
         
         # Log batch loss to TensorBoard if writer is provided
@@ -68,7 +68,7 @@ def train_loop(model: torch.nn.Module,
             global_step = epoch * len(train_loader) + batch_idx
             writer.add_scalar('Loss/train_batch', batch_loss, global_step)
     
-    avg_loss = train_loss / len(train_loader.dataset)
+    avg_loss = train_loss / len(train_loader)
     return avg_loss, batch_losses
 
 def val_loop(model, val_loader, criterion, device):
@@ -96,10 +96,10 @@ def val_loop(model, val_loader, criterion, device):
             outputs = model(images)
             loss = criterion(outputs, masks)
             
-            val_loss += loss.item() * images.size(0)
+            val_loss += loss.item()
             val_loop.set_postfix(loss=loss.item())
     
-    return val_loss / len(val_loader.dataset)
+    return val_loss / len(val_loader)
 
 def log_predictions(model: torch.nn.Module, 
                     val_loader: DataLoader, 
