@@ -1,5 +1,4 @@
 import os
-from mypt.nets.conv_nets.diffusion_unet.wrapper.diffusion_unet import DiffusionUNet
 import torch
 import shutil
 
@@ -16,6 +15,7 @@ from torch.utils.data import DataLoader, Dataset
 
 from mypt.shortcuts import P
 from mypt.code_utils import directories_and_files as dirf
+from mypt.nets.conv_nets.diffusion_unet.wrapper.diffusion_unet import DiffusionUNet
 from mypt.data.dataloaders.standard_dataloaders import initialize_train_dataloader, initialize_val_dataloader
 
 

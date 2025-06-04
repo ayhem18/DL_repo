@@ -32,11 +32,16 @@
 *.tfevents*
 
 # dataset
-diffusers/dataset/
+diffusers/dataset/train
+diffusers/dataset/val
+
 
 # runs
 diffusers/runs/
 
 # samples
 diffusers/samples/
+
+*.gz
+*-ubyte
 

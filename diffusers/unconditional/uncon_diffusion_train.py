@@ -11,21 +11,21 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
 
-
-
 from mypt.shortcuts import P
 from mypt.code_utils import directories_and_files as dirf
 from mypt.nets.conv_nets.diffusion_unet.wrapper.diffusion_unet import DiffusionUNet
+from mypt.visualization.general import visualize
 
 
-def train_diffusion_epoch(model: DiffusionUNet, 
+def train_epoch(model: DiffusionUNet, 
                 noise_scheduler: DDPMScheduler,
-               train_loader: DataLoader, 
-               criterion: torch.nn.Module, 
-               optimizer: torch.optim.Optimizer, 
-               device: torch.device,
-               writer: SummaryWriter = None,
-               epoch: int = None):
+                train_loader: DataLoader, 
+                criterion: torch.nn.Module, 
+                optimizer: torch.optim.Optimizer, 
+                device: torch.device,
+                writer: SummaryWriter = None,
+                epoch: int = None,
+                debug: bool = False):
     """
     Run one epoch of training.
     
@@ -62,20 +62,14 @@ def train_diffusion_epoch(model: DiffusionUNet,
     # # (this is the forward diffusion process)
     # noisy_images = noise_scheduler.add_noise(batch, noise, timesteps)
 
+    debug_samples = []
 
-    for batch_idx, (images, labels, mask_bbx) in enumerate(train_loop):
-        if batch_idx > 15:
-            break
-
+    for batch_idx, images in enumerate(train_loop):
         # move all data to the device
-        images = images.to(device)
-        labels = labels.to(device)
-        mask_bbx = mask_bbx.to(device)
-        
+        images = images.to(device)        
         # Zero the parameter gradients
         optimizer.zero_grad()
         
-
         # create noise
         noise = torch.randn(images.shape, device=images.device)
 
@@ -92,10 +86,12 @@ def train_diffusion_epoch(model: DiffusionUNet,
         # add noise to the images
         noisy_images = noise_scheduler.add_noise(images, noise, timesteps).to(torch.float32)
 
-        outputs = model.forward(noisy_images, timesteps, labels, mask_bbx)
+        if debug:
+            debug_ni = noisy_images[0].detach().cpu()
+            debug_samples.append(debug_ni)
 
-        # Forward pass
-        # outputs = model(noisy_images)
+        outputs = model.forward(noisy_images, timesteps)
+
         loss = criterion(outputs, noise)
         
         # Backward pass and optimize
@@ -115,14 +111,18 @@ def train_diffusion_epoch(model: DiffusionUNet,
             global_step = epoch * len(train_loader) + batch_idx
             writer.add_scalar('Loss/train_batch', batch_loss, global_step)
     
+
+    if debug:
+        for i, s in enumerate(debug_samples):
+            visualize(s, window_name=f"Debug Sample {i}")
+
+
     avg_loss = train_loss / len(train_loader)
     return avg_loss, batch_losses
 
 
 def sample_from_diffusion_model(model: DiffusionUNet, 
                                 images: torch.Tensor,
-                                labels: torch.Tensor, 
-                                masks: torch.Tensor,
                                 noise_scheduler: DDPMScheduler,
                                 device: torch.device):
     
@@ -137,7 +137,7 @@ def sample_from_diffusion_model(model: DiffusionUNet,
     
         with torch.no_grad():
             # 1. predict noise residual
-            residual = model.forward(samples, torch.ones(samples.shape[0], device=device) * t, labels, masks) # generate images with the same label and the same masks as the validation batch
+            residual = model.forward(samples, torch.ones(samples.shape[0], device=device) * t) # generate images with the same label and the same masks as the validation batch
             # 2. compute previous image and set x_t -> x_t-1
             samples = noise_scheduler.step(residual, t, samples).prev_sample
 
@@ -177,7 +177,7 @@ def val_diffusion_epoch(model: DiffusionUNet,
             labels = labels.to(device)
             mask_bbx = mask_bbx.to(device)
             
-            diffusion_samples = sample_from_diffusion_model(model, images, labels, mask_bbx, noise_scheduler, device=device)
+            diffusion_samples = sample_from_diffusion_model(model, images, noise_scheduler, device=device)
 
             epoch_dir = os.path.join(val_dir, f"epoch_{epoch+1}")
             dirf.process_path(epoch_dir, dir_ok=True, file_ok=False, must_exist=False)
@@ -191,59 +191,7 @@ def val_diffusion_epoch(model: DiffusionUNet,
 
                 Image.fromarray(s).save(os.path.join(epoch_dir, f"sample_{batch_idx}_{i}.png"))
 
-    #         # save the samples
-    #         outputs = model.forward(images, timesteps, labels, mask_bbx)
-    #         loss = criterion(outputs, noise)
-            
-    #         val_loss += loss.item()
-    #         val_loop.set_postfix(loss=loss.item())
-    
-    # return val_loss / len(val_loader)
 
-def log_predictions(model: torch.nn.Module, 
-                    val_loader: DataLoader, 
-                    writer: SummaryWriter, 
-                    epoch: int, 
-                    device: torch.device):
-    """Log sample predictions to TensorBoard"""
-    model.eval()
-
-    images, masks = next(iter(val_loader))
-    
-    images = images.to(device)
-    masks = masks.to(device)
-    
-    with torch.no_grad():
-        outputs = model(images)
-        predictions = (torch.sigmoid(outputs) > 0.5)
-
-    images = images.cpu().permute(0, 2, 3, 1).numpy().astype(np.uint8)
-    # convert the masks to the [0, 255] range and the type uint8
-    masks = (masks.cpu().permute(0, 2, 3, 1).numpy() * 255).astype(np.uint8) 
-    predictions = (predictions.cpu().permute(0, 2, 3, 1).numpy() * 255).clip(0, 255).astype(np.uint8)
-
-    # Log a few sample images
-    for i in range(min(3, len(images))):
-        fig, axes = plt.subplots(1, 3, figsize=(15, 5))
-        
-        # Original image
-        axes[0].imshow(images[i])
-        axes[0].set_title("Input Image")
-        axes[0].axis('off')
-        
-        # Ground truth mask
-        axes[1].imshow(masks[i])
-        axes[1].set_title("Ground Truth")
-        axes[1].axis('off')
-        
-        # Predicted mask
-        axes[2].imshow(predictions[i])
-        axes[2].set_title("Prediction")
-        axes[2].axis('off')
-        
-        plt.tight_layout()
-        writer.add_figure(f'Predictions/sample_{i}', fig, epoch)
-        plt.close(fig)
 
 def train_diffusion_model(model: DiffusionUNet, 
                noise_scheduler: DDPMScheduler,
@@ -280,7 +228,7 @@ def train_diffusion_model(model: DiffusionUNet,
     for epoch in range(num_epochs):
         
         # Training phase
-        train_loss, batch_losses = train_diffusion_epoch(
+        train_loss, batch_losses = train_epoch(
             model=model,
             noise_scheduler=noise_scheduler,
             train_loader=train_loader,
