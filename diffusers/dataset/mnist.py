@@ -38,7 +38,7 @@ class MnistDSWrapper(Dataset):
             root=root,
             train=train,
             download=not os.path.exists(root),
-            transform=None  # We'll apply transforms ourselves
+            transform=None 
         )
         
         # Store parameters

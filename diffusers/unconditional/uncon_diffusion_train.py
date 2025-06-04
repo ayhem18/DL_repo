@@ -48,25 +48,19 @@ def train_epoch(model: DiffusionUNet,
     
     train_loop = tqdm(train_loader, desc="Training")
 
-    # batch_size = batch.shape[0]
-    # # Sample noise to add to the images
-    # noise = torch.randn(batch.shape, device=batch.device)
-
-    # # Sample a random timestep for each image
-    # timesteps = torch.randint(
-    #     0, noise_scheduler.config.num_train_timesteps, (batch_size,), device=device,
-    #     dtype=torch.int64
-    # )
-
-    # # Add noise to the clean images according to the noise magnitude at each timestep
-    # # (this is the forward diffusion process)
-    # noisy_images = noise_scheduler.add_noise(batch, noise, timesteps)
 
     debug_samples = []
 
     for batch_idx, images in enumerate(train_loop):
         # move all data to the device
         images = images.to(device)        
+        
+        # scale the image to the range [-1, 1]
+        images = images * 2.0 - 1.0
+
+        if not torch.all(images >= -1.0) or not torch.all(images <= 1.0):
+            raise ValueError("Images must be scaled to the [-1, 1] range. Otherwise, it might affect the training process.")
+        
         # Zero the parameter gradients
         optimizer.zero_grad()
         
@@ -114,6 +108,8 @@ def train_epoch(model: DiffusionUNet,
 
     if debug:
         for i, s in enumerate(debug_samples):
+            # rescale s 
+            s = (s + 1) * 127.5
             visualize(s, window_name=f"Debug Sample {i}")
 
 
@@ -124,12 +120,13 @@ def train_epoch(model: DiffusionUNet,
 def sample_from_diffusion_model(model: DiffusionUNet, 
                                 images: torch.Tensor,
                                 noise_scheduler: DDPMScheduler,
-                                device: torch.device):
+                                device: torch.device,
+                                debug: bool = False):
     
     model = model.to(device)
     model.eval()
 
-    noise_scheduler.set_timesteps(num_inference_steps=100)
+    noise_scheduler.set_timesteps(num_inference_steps=1000)
 
     samples = torch.randn(*images.shape, device=device)
 
@@ -138,6 +135,10 @@ def sample_from_diffusion_model(model: DiffusionUNet,
         with torch.no_grad():
             # 1. predict noise residual
             residual = model.forward(samples, torch.ones(samples.shape[0], device=device) * t) # generate images with the same label and the same masks as the validation batch
+            
+            if not isinstance(residual, torch.Tensor):
+                residual = residual.sample 
+            
             # 2. compute previous image and set x_t -> x_t-1
             samples = noise_scheduler.step(residual, t, samples).prev_sample
 
@@ -168,14 +169,14 @@ def val_diffusion_epoch(model: DiffusionUNet,
     with torch.no_grad():
         val_loop = tqdm(val_loader, desc="Validation")
 
-        for batch_idx, (images, labels, mask_bbx) in enumerate(val_loop):
+        for batch_idx, images in enumerate(val_loop):
             
             if batch_idx > 2:
                 break
 
             images = images.to(device)
-            labels = labels.to(device)
-            mask_bbx = mask_bbx.to(device)
+            # labels = labels.to(device)
+            # mask_bbx = mask_bbx.to(device)
             
             diffusion_samples = sample_from_diffusion_model(model, images, noise_scheduler, device=device)
 
@@ -199,11 +200,13 @@ def train_diffusion_model(model: DiffusionUNet,
                val_loader: DataLoader, 
                criterion: torch.nn.Module, 
                optimizer: torch.optim.Optimizer, 
-            #    lr_scheduler: torch.optim.lr_scheduler.LRScheduler,
+               lr_scheduler: torch.optim.lr_scheduler.LRScheduler,
                num_epochs: int, 
                device: torch.device, 
                writer: SummaryWriter,
-               log_dir: P):
+               log_dir: P,
+               val_per_epoch: int = 5,
+               debug: bool = False):
     """
     Train the model and validate it periodically.
     
@@ -236,15 +239,17 @@ def train_diffusion_model(model: DiffusionUNet,
             optimizer=optimizer,
             device=device,
             writer=writer,
-            epoch=epoch
+            epoch=epoch,
+            debug=debug,
         )
         
-        # lr_scheduler.step()
+        lr_scheduler.step()
         
         writer.add_scalar('Loss/train_epoch', train_loss, epoch)
         all_train_losses.append(train_loss)
         
-        val_diffusion_epoch(model, noise_scheduler, val_loader, criterion, device, os.path.join(log_dir, 'samples'), epoch)
+        if epoch % val_per_epoch == 0:
+            val_diffusion_epoch(model, noise_scheduler, val_loader, criterion, device, os.path.join(log_dir, 'samples'), epoch)
 
 
         # Validation phase

@@ -1,8 +1,7 @@
 import json
 
-from typing import List, Tuple
+from typing import Tuple
 from dataclasses import asdict, dataclass
-from albumentations import BasicTransform
 
 from mypt.shortcuts import P
 
@@ -46,14 +45,14 @@ class ModelConfig(Config):
 
 @dataclass
 class OptimizerConfig(Config):
-    learning_rate: float = 1e-4
+    learning_rate: float = 1e-3
     weight_decay: float = 0.0
-
+    # lr_warmup_steps: int = 100
 
 @dataclass
 class TrainingConfig(Config):
-    train_batch_size: int = 200 # set to 4 locally, and 128 on the server
-    val_batch_size: int = 64 # set to 8 locally, and 64 on the server
-    num_epochs: int = 5    
+    train_batch_size: int = 4
+    val_batch_size: int = 4
+    num_epochs: int =50    
     seed: int = 42
 

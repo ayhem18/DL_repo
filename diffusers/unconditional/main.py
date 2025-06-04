@@ -1,5 +1,4 @@
 import os
-from mypt.data.datasets.genericFolderDs import MnistGenericWrapper
 import torch
 import shutil
 
@@ -7,9 +6,9 @@ import albumentations as A
 
 
 from pathlib import Path
+from typing import Tuple, Union
 from diffusers import DDPMScheduler
 
-from typing import Optional, Tuple, Union
 from torch.utils.tensorboard import SummaryWriter
 from torch.utils.data import DataLoader, Dataset
 
@@ -20,9 +19,9 @@ from mypt.nets.conv_nets.diffusion_unet.wrapper.diffusion_unet import DiffusionU
 from mypt.data.dataloaders.standard_dataloaders import initialize_train_dataloader, initialize_val_dataloader
 
 
-from DL_repo.diffusers.dataset.mnist import MnistDSWrapper
+from dataset.mnist import MnistDSWrapper
+from uncon_diffusion_train import train_diffusion_model
 from config import ModelConfig, OptimizerConfig, TrainingConfig
-from DL_repo.diffusers.unconditional.uncon_diffusion_train import train_diffusion_model
 
 
 
@@ -34,48 +33,45 @@ while 'data' not in os.listdir(current_dir):
 DATA_DIR = os.path.join(current_dir, 'data') 
 
 
-def set_data(model_config: ModelConfig, train_config: TrainingConfig, return_datasets: bool = False) -> Union[Tuple[DataLoader, DataLoader], 
-                                                                           Tuple[DataLoader, DataLoader, Dataset, Dataset]]:
+def set_data(model_config: ModelConfig, 
+             train_config: TrainingConfig, 
+             return_datasets: bool = False) -> Union[Tuple[DataLoader, DataLoader],Tuple[DataLoader, DataLoader, Dataset, Dataset]]:
+
     train_data_path = os.path.join(SCRIPT_DIR, 'data', 'train')
     val_data_path = os.path.join(SCRIPT_DIR, 'data', 'val')
 
+    train_transforms = [
+        A.RandomResizedCrop(size=model_config.input_shape[1:], scale=(0.4, 1)),
+        A.ToTensorV2()
+    ]
+    
+    val_transforms = [
+        A.RandomResizedCrop(size=model_config.input_shape[1:], scale=(0.4, 1)),
+        A.ToTensorV2()
+    ]
 
-    train_transforms = A.Compose([
-        # A.Resize(height=config.input_shape[1], width=config.input_shape[2]),
-        # A.HorizontalFlip(p=0.5),
-        # A.VerticalFlip(p=0.5),
-        # A.RandomBrightnessContrast(p=0.2),
-        A.ToTensorV2(),
-    ])
+    # create the datasets
+    train_ds = MnistDSWrapper(root=train_data_path, 
+                              train=True, 
+                              transforms=train_transforms, 
+                              output_shape=(48, 48),
+                              unconditional=True
+                              )
     
-    val_transforms = A.Compose([
-        # A.Resize(height=config.output_shape[1], width=config.output_shape[2]),
-        A.ToTensorV2(),
-    ])
+    val_ds = MnistDSWrapper(root=val_data_path, 
+                            train=False, 
+                            transforms=val_transforms, 
+                            output_shape=(48, 48),
+                            unconditional=True
+                            )
 
-    # Create datasets
-    train_dataset = MnistGenericWrapper(
-        root=train_data_path,
-        train=True,
-        download=not os.path.exists(train_data_path),
-        transforms=train_transforms,
-        output_shape=model_config.input_shape[1:]
-    )
-    
-    val_dataset = MnistGenericWrapper(
-        root=val_data_path,
-        train=False,
-        download=not os.path.exists(val_data_path),
-        transforms=val_transforms,
-        output_shape=model_config.input_shape[1:]
-    )
-    
+
     # Create data loaders
-    train_loader = initialize_train_dataloader(train_dataset, seed=42, batch_size=train_config.train_batch_size, num_workers=2, drop_last=True)
-    val_loader = initialize_val_dataloader(val_dataset, seed=42, batch_size=train_config.val_batch_size, num_workers=2)
+    train_loader = initialize_train_dataloader(train_ds, seed=42, batch_size=train_config.train_batch_size, num_workers=2, drop_last=True)
+    val_loader = initialize_val_dataloader(val_ds, seed=42, batch_size=train_config.val_batch_size, num_workers=2)
 
     if return_datasets:
-        return train_loader, val_loader, train_dataset, val_dataset
+        return train_loader, val_loader, train_ds, val_ds
 
     return train_loader, val_loader
 
@@ -101,22 +97,49 @@ def prepare_log_directory() -> P:
     return exp_log_dir
 
 
-
 def set_model(config: ModelConfig) -> DiffusionUNet:
-    model = DiffusionUNet(input_channels=config.input_shape[0],
-                          output_channels=config.input_shape[0],
-                          cond_dimension=128,                          
-                          )
+    from diffusers import UNet2DModel
     
-    model.build_down_block(num_down_layers=2, num_res_blocks=2, out_channels=[16, 32], downsample_types="conv")
-    model.build_middle_block(num_res_blocks=2, inner_dim=256)
-    model.build_up_block(num_res_blocks=2, upsample_types="transpose_conv", inner_dim=256)
+    # let's use the default model for now.
+    model = UNet2DModel(
+        sample_size=config.input_shape[1:],
+        in_channels=config.input_shape[0],
+        out_channels=config.input_shape[0],
+        # layers_per_block=3,
+        # block_out_channels=(32, 64, 128),
+        # down_block_types=("DownBlock2D", "DownBlock2D", "DownBlock2D"),
+        # up_block_types=("UpBlock2D", "UpBlock2D", "UpBlock2D"),
+        # block_out_channels=(32, 64, 128),
+    )
 
     return model
 
+    # model = DiffusionUNet(input_channels=config.input_shape[0],
+    #                       output_channels=config.input_shape[0],
+    #                       cond_dimension=128,                          
+    #                       )
+    
+    # return model
 
-def main(checkpoint_path: Optional[str]=None, sanity_check: bool = False):
 
+# def set_model(config: ModelConfig) -> DiffusionUNet:
+#     model = DiffusionUNet(input_channels=config.input_shape[0],
+#                           output_channels=config.input_shape[0],
+#                           cond_dimension=128,                          
+#                           )
+    
+#     model.build_down_block(num_down_layers=3, num_res_blocks=3, out_channels=[32, 64, 128], downsample_types="conv")
+#     model.build_middle_block(num_res_blocks=3)
+#     model.build_up_block(num_res_blocks=3, upsample_types="transpose_conv")
+
+#     return model
+
+
+from diffusers.optimization import get_cosine_schedule_with_warmup
+
+
+
+def main():
     model_config = ModelConfig()
     opt_config = OptimizerConfig()
     train_config = TrainingConfig() 
@@ -135,8 +158,17 @@ def main(checkpoint_path: Optional[str]=None, sanity_check: bool = False):
     # Initialize TensorBoard writer
     exp_log_dir = prepare_log_directory()
     writer = SummaryWriter(os.path.join(exp_log_dir, 'logs'))
-    
-    noise_scheduler = DDPMScheduler(num_train_timesteps=250)
+
+    # the parameters of the noise scheduler were set by playing around with the noise scheduler and visualizing the results.
+    # check the sanity_checks.py file for more details.
+    noise_scheduler = DDPMScheduler(num_train_timesteps=1000, beta_schedule="linear", beta_end=0.0015) 
+
+    lr_scheduler = get_cosine_schedule_with_warmup(
+        optimizer=optimizer,
+        num_warmup_steps=len(train_loader) * 5, # 5 epochs to warm up
+        num_training_steps=(len(train_loader) * train_config.num_epochs),
+    )
+
 
     # Train the model
     trained_model = train_diffusion_model(
@@ -146,19 +178,22 @@ def main(checkpoint_path: Optional[str]=None, sanity_check: bool = False):
         val_loader=val_loader,
         criterion=criterion,
         optimizer=optimizer,
+        lr_scheduler=lr_scheduler,
         num_epochs=train_config.num_epochs,
         device=device, 
         writer=writer,
-        log_dir=exp_log_dir
+        log_dir=exp_log_dir,
+        debug=False
     )
     
     # Save the final model
     model_path = os.path.join(exp_log_dir, 'final_model.pth')
     torch.save(trained_model.state_dict(), model_path)
     
-    # # Save the config
-    # config_path = os.path.join(exp_log_dir, 'config.json')
-    # train_config.save(config_path)
+    # Save the config
+    model_config.save(os.path.join(exp_log_dir, 'model_config.json'))
+    opt_config.save(os.path.join(exp_log_dir, 'opt_config.json'))
+    # train_config.save(os.path.join(exp_log_dir, 'train_config.json'))
     
     # Clean up temporary directories    
     print("Training completed!")

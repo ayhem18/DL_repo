@@ -103,79 +103,6 @@ def visualize_mnist_samples(
     return samples
 
 
-def analyze_dataset_statistics(
-    root: str = "./data",
-    output_shape: Tuple[int, int] = (64, 64),
-    num_samples: int = 1000
-):
-    """
-    Analyze statistics of the dataset to ensure it's behaving as expected.
-    
-    Args:
-        root: Path to the MNIST dataset
-        output_shape: Shape to pad images to
-        num_samples: Number of samples to analyze
-    """
-    # Initialize the dataset without transformations for clean analysis
-    dataset = MnistDSWrapper(
-        root=root,
-        train=True,
-        transforms=None,
-        output_shape=output_shape
-    )
-    
-    # Collect statistics
-    stats = {
-        "num_samples": min(num_samples, len(dataset)),
-        "class_distribution": {},
-        "label_map_stats": {
-            "min": float('inf'),
-            "max": float('-inf'),
-            "mean_nonzero": 0,
-            "total_nonzero_pixels": 0
-        }
-    }
-    
-    for i in range(min(num_samples, len(dataset))):
-        image, label, label_map = dataset[i]
-        
-        # Update class distribution
-        if label not in stats["class_distribution"]:
-            stats["class_distribution"][label] = 0
-        stats["class_distribution"][label] += 1
-        
-        # Update label map statistics
-        label_map_np = label_map.numpy()
-        stats["label_map_stats"]["min"] = min(stats["label_map_stats"]["min"], label_map_np.min())
-        stats["label_map_stats"]["max"] = max(stats["label_map_stats"]["max"], label_map_np.max())
-        
-        # Count non-zero pixels and their mean value
-        nonzero_mask = label_map_np > 0
-        num_nonzero = nonzero_mask.sum()
-        if num_nonzero > 0:
-            stats["label_map_stats"]["total_nonzero_pixels"] += num_nonzero
-            stats["label_map_stats"]["mean_nonzero"] += label_map_np[nonzero_mask].sum()
-    
-    # Calculate final mean of non-zero pixels
-    if stats["label_map_stats"]["total_nonzero_pixels"] > 0:
-        stats["label_map_stats"]["mean_nonzero"] /= stats["label_map_stats"]["total_nonzero_pixels"]
-    
-    # Pretty print the statistics
-    print("\n===== Dataset Statistics =====")
-    print(f"Analyzed {stats['num_samples']} samples with output shape {output_shape}")
-    
-    print("\nClass Distribution:")
-    for label, count in sorted(stats["class_distribution"].items()):
-        print(f"  Class {label}: {count} samples ({count/stats['num_samples']*100:.1f}%)")
-    
-    print("\nLabel Map Statistics:")
-    print(f"  Min value: {stats['label_map_stats']['min']}")
-    print(f"  Max value: {stats['label_map_stats']['max']}")
-    print(f"  Mean of non-zero pixels: {stats['label_map_stats']['mean_nonzero']:.2f}")
-    print(f"  Total non-zero pixels: {stats['label_map_stats']['total_nonzero_pixels']}")
-    
-    return stats
-
 
 if __name__ == "__main__":
     # Set the root path for the dataset
@@ -191,12 +118,3 @@ if __name__ == "__main__":
             save_path="mnist_visualization.png"
         )
     
-    # # Analyze dataset statistics
-    # print("\nAnalyzing dataset statistics...")
-    # stats = analyze_dataset_statistics(
-    #     root=data_root,
-    #     output_shape=(64, 64),
-    #     num_samples=1000
-    # )
-    
-    # print("\nVisualization and analysis complete!") 

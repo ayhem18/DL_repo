@@ -95,7 +95,7 @@ def visualize_noisy_images():
 
         noise = torch.randn(batch.shape, device=device)
 
-        timesteps = torch.tensor([950] * batch.shape[0], device=device, dtype=torch.int64)
+        timesteps = torch.tensor([200] * batch.shape[0], device=device, dtype=torch.int64)
 
         # timesteps = torch.randint(
         #     0, noise_scheduler.config.num_train_timesteps, (batch.shape[0],), device=device,

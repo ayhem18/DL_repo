@@ -28,9 +28,10 @@ class MnistDSWrapper(Dataset):
                  root: str, 
                  train: bool = True,
                  transforms: Optional[Union[List[A.BasicTransform], A.Compose]] = None,
-                 output_shape: Tuple[int, int] = (64, 64)):
+                 output_shape: Tuple[int, int] = (48, 48),
+                 unconditional: bool = False):
         
-        # Load the MNIST dataset from torchvision
+        # use a wrapper of the mnist dataset 
         self.mnist_dataset = datasets.MNIST(
             root=root,
             train=train,
@@ -61,8 +62,13 @@ class MnistDSWrapper(Dataset):
         else: 
             self.transforms = A.Compose([transforms])
 
+        self.unconditional = unconditional
+
+
     def __len__(self):
-        return len(self.mnist_dataset)
+        # return the length of the mnist dataset
+        return 2000
+        # return len(self.mnist_dataset)
 
     def _pad_to_output_shape(self, image: np.ndarray) -> np.ndarray:
         """
@@ -160,6 +166,9 @@ class MnistDSWrapper(Dataset):
         if len(bounding_box_mask.shape) == 2:
             bounding_box_mask = bounding_box_mask.unsqueeze(0)
         
+        if self.unconditional:
+            return transformed_image
+
         return transformed_image, label, bounding_box_mask
 
 
