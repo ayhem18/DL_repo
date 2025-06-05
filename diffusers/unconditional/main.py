@@ -76,8 +76,6 @@ def set_data(model_config: ModelConfig,
     return train_loader, val_loader
 
 
-
-
 def prepare_log_directory() -> P:
     logs_dir = dirf.process_path(os.path.join(SCRIPT_DIR, 'runs'), dir_ok=True, file_ok=False)
 
@@ -97,14 +95,17 @@ def prepare_log_directory() -> P:
     return exp_log_dir
 
 
-def set_model(config: ModelConfig) -> DiffusionUNet:
-    from diffusers import UNet2DModel
+from diffusers import UNet2DModel
+
+# one that uses the diffusers implementation of the diffusion unet
+def set_model(config: ModelConfig) -> UNet2DModel:
     
     # let's use the default model for now.
     model = UNet2DModel(
         sample_size=config.input_shape[1:],
         in_channels=config.input_shape[0],
         out_channels=config.input_shape[0],
+
         # layers_per_block=3,
         # block_out_channels=(32, 64, 128),
         # down_block_types=("DownBlock2D", "DownBlock2D", "DownBlock2D"),
@@ -112,27 +113,29 @@ def set_model(config: ModelConfig) -> DiffusionUNet:
         # block_out_channels=(32, 64, 128),
     )
 
+
+
     return model
 
-    # model = DiffusionUNet(input_channels=config.input_shape[0],
-    #                       output_channels=config.input_shape[0],
-    #                       cond_dimension=128,                          
-    #                       )
+
+# a function using my own implementation of the diffusion unet
+
+def set_model(config: ModelConfig) -> DiffusionUNet:
+
+    model = DiffusionUNet(input_channels=config.input_shape[0],
+                          output_channels=config.input_shape[0],
+                          cond_dimension=256,                          
+                          )
     
-    # return model
+    # the default model reaches a training loss of 0.01 in less than 10 epochs
+    # let's try to use a model with a similar capacity: it uses attention blocks which aren't currently implemented 
+    # however, let's match the number of blocks + the number of channels. 
 
+    model.build_down_block(num_down_layers=4, num_res_blocks=3, out_channels=[256, 512, 1024, 1024], downsample_types="conv")
+    model.build_middle_block(num_res_blocks=3)
+    model.build_up_block(num_res_blocks=3, upsample_types="transpose_conv")
 
-# def set_model(config: ModelConfig) -> DiffusionUNet:
-#     model = DiffusionUNet(input_channels=config.input_shape[0],
-#                           output_channels=config.input_shape[0],
-#                           cond_dimension=128,                          
-#                           )
-    
-#     model.build_down_block(num_down_layers=3, num_res_blocks=3, out_channels=[32, 64, 128], downsample_types="conv")
-#     model.build_middle_block(num_res_blocks=3)
-#     model.build_up_block(num_res_blocks=3, upsample_types="transpose_conv")
-
-#     return model
+    return model
 
 
 from diffusers.optimization import get_cosine_schedule_with_warmup
@@ -152,7 +155,7 @@ def main():
 
     # Define loss function and optimizer
     criterion = torch.nn.MSELoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=opt_config.learning_rate)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=opt_config.learning_rate)
 
 
     # Initialize TensorBoard writer
@@ -163,9 +166,12 @@ def main():
     # check the sanity_checks.py file for more details.
     noise_scheduler = DDPMScheduler(num_train_timesteps=1000, beta_schedule="linear", beta_end=0.0015) 
 
+
+    # why ? no good reason, just copied from 
+    # https://colab.research.google.com/github/huggingface/notebooks/blob/main/diffusers/training_example.ipynb#scrollTo=my90vVcmxU5V
     lr_scheduler = get_cosine_schedule_with_warmup(
         optimizer=optimizer,
-        num_warmup_steps=len(train_loader) * 5, # 5 epochs to warm up
+        num_warmup_steps=len(train_loader) * 2, # 2 epochs to warm up
         num_training_steps=(len(train_loader) * train_config.num_epochs),
     )
 

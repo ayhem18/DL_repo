@@ -6,12 +6,14 @@ import matplotlib.pyplot as plt
 
 from tqdm import tqdm
 from PIL import Image
+from typing import Optional
 from diffusers import DDPMScheduler
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
 
 from mypt.shortcuts import P
+from mypt.visualization.general import visualize
 from mypt.code_utils import directories_and_files as dirf
 from mypt.nets.conv_nets.diffusion_unet.wrapper.diffusion_unet import DiffusionUNet
 
@@ -117,6 +119,58 @@ def train_diffusion_epoch(model: DiffusionUNet,
     return avg_loss, batch_losses
 
 
+def val_diffusion_epoch(model: DiffusionUNet, 
+                        noise_scheduler: DDPMScheduler,
+                        val_loader: DataLoader, 
+                        criterion: torch.nn.Module, 
+                        device: torch.device,
+                        writer: Optional[SummaryWriter] = None,
+                        epoch: Optional[int] = None):
+    
+    model = model.to(device)
+    model.eval()
+
+    val_loop = tqdm(val_loader, desc="Validation")
+
+    val_batch_losses = [None for _ in range(len(val_loader))]
+
+    for batch_idx, images in enumerate(val_loop):
+        noise = torch.randn(images.shape, device=images.device)
+        images = images.to(device)
+
+        # convert images to the [-1, 1] range
+        images = (images * 2) - 1
+
+        # make sure the range is correct
+        if torch.max(images) > 1 or torch.min(images) < -1:
+            raise ValueError("the images must be in the [-1, 1]. Otherwise, it might affect the training process.")
+
+        timesteps = torch.randint(
+            0, 
+            noise_scheduler.config.num_train_timesteps, 
+            
+            (images.shape[0],), device=images.device,
+            dtype=torch.int64
+        )   
+
+        noisy_images = noise_scheduler.add_noise(images, noise, timesteps).to(torch.float32)
+
+        outputs = model.forward(noisy_images, timesteps)
+
+        loss = criterion(outputs, noise)
+
+        loss_value = loss.item()
+        val_batch_losses[batch_idx] = loss_value
+        val_loop.set_postfix(loss=loss_value)
+        
+        if writer is not None and epoch is not None:
+            global_step = epoch * len(val_loader) + batch_idx
+            writer.add_scalar('Loss/val_batch', loss_value, global_step)
+
+    avg_loss = sum(val_batch_losses) / len(val_loader)
+    return avg_loss, val_batch_losses
+
+
 def sample_from_diffusion_model(model: DiffusionUNet, 
                                 images: torch.Tensor,
                                 labels: torch.Tensor, 
@@ -142,14 +196,13 @@ def sample_from_diffusion_model(model: DiffusionUNet,
     return samples
 
 
-
-def val_diffusion_epoch(model: DiffusionUNet, 
+def val_sample_diffusion_epoch(model: DiffusionUNet, 
                         noise_scheduler: DDPMScheduler,
                         val_loader: DataLoader, 
-                        criterion: torch.nn.Module, 
                         device: torch.device,
                         val_dir: P,
-                        epoch: int):
+                        epoch: int,
+                        debug: bool = False):
     """
     Run one epoch of validation.
     
@@ -166,16 +219,14 @@ def val_diffusion_epoch(model: DiffusionUNet,
     with torch.no_grad():
         val_loop = tqdm(val_loader, desc="Validation")
 
-        for batch_idx, (images, labels, mask_bbx) in enumerate(val_loop):
+        for batch_idx, images in enumerate(val_loop):
             
             if batch_idx > 2:
                 break
 
             images = images.to(device)
-            labels = labels.to(device)
-            mask_bbx = mask_bbx.to(device)
             
-            diffusion_samples = sample_from_diffusion_model(model, images, labels, mask_bbx, noise_scheduler, device=device)
+            diffusion_samples = sample_from_diffusion_model(model, images, noise_scheduler, device=device)
 
             epoch_dir = os.path.join(val_dir, f"epoch_{epoch+1}")
             dirf.process_path(epoch_dir, dir_ok=True, file_ok=False, must_exist=False)
@@ -187,16 +238,12 @@ def val_diffusion_epoch(model: DiffusionUNet,
                 else:
                     s = s.cpu().squeeze(0).numpy().astype(np.uint8)
 
+                if debug:
+                    visualize(s, title=f"sample_{batch_idx}_{i}")
+
                 Image.fromarray(s).save(os.path.join(epoch_dir, f"sample_{batch_idx}_{i}.png"))
 
-    #         # save the samples
-    #         outputs = model.forward(images, timesteps, labels, mask_bbx)
-    #         loss = criterion(outputs, noise)
-            
-    #         val_loss += loss.item()
-    #         val_loop.set_postfix(loss=loss.item())
-    
-    # return val_loss / len(val_loader)
+
 
 def log_predictions(model: torch.nn.Module, 
                     val_loader: DataLoader, 
@@ -293,28 +340,36 @@ def train_diffusion_model(model: DiffusionUNet,
         
         writer.add_scalar('Loss/train_epoch', train_loss, epoch)
         all_train_losses.append(train_loss)
-        
-        val_diffusion_epoch(model, noise_scheduler, val_loader, criterion, device, os.path.join(log_dir, 'samples'), epoch)
 
+
+
+        # val_diffusion_epoch(model, noise_scheduler, val_loader, criterion, device, os.path.join(log_dir, 'samples'), epoch)
 
         # Validation phase
-        # val_loss = val_epoch(
-        #     model=model,
-        #     val_loader=val_loader,
-        #     criterion=criterion,
-        #     device=device
-        # )
-        # writer.add_scalar('Loss/val_epoch', val_loss, epoch)
-        # all_val_losses.append(val_loss)
+        val_loss, val_batch_losses = val_diffusion_epoch(
+            model=model,
+            noise_scheduler=noise_scheduler,
+            val_loader=val_loader,
+            criterion=criterion,
+            device=device,
+            writer=writer,
+            epoch=epoch
+        )
+
+        writer.add_scalar('Loss/val_epoch', val_loss, epoch)
+        all_val_losses.append(val_loss)
         
         print(f"Epoch {epoch+1}/{num_epochs} - Train Loss: {train_loss:.4f}")        
 
-        # # Save the model if validation loss improves
-        # if val_loss < best_val_loss:
-        #     best_val_loss = val_loss
-        #     torch.save(model.state_dict(), os.path.join(log_dir, 'best_model.pth'))
-        #     print(f"Model saved with validation loss: {val_loss:.4f}")
-        
+        # Save the model if validation loss improves
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            torch.save(model.state_dict(), os.path.join(log_dir, 'best_model.pth'))
+            print(f"Model saved with validation loss: {val_loss:.4f}")
+
+        if epoch % val_per_epoch == 0:
+            val_sample_diffusion_epoch(model, noise_scheduler, val_loader, device, os.path.join(log_dir, 'samples'), epoch)
+
         # Log sample predictions
         # if epoch % 5 == 0:
         #     log_predictions(model, val_loader, writer, epoch, device)

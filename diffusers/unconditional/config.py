@@ -46,13 +46,13 @@ class ModelConfig(Config):
 @dataclass
 class OptimizerConfig(Config):
     learning_rate: float = 1e-3
-    weight_decay: float = 0.0
+    # weight_decay: float = 0.0
     # lr_warmup_steps: int = 100
 
 @dataclass
 class TrainingConfig(Config):
     train_batch_size: int = 4
-    val_batch_size: int = 4
+    val_batch_size: int = 2
     num_epochs: int =50    
     seed: int = 42
 

@@ -53,7 +53,7 @@ def visualize_dataset():
 
 
 from dataset.mnist import MnistDSWrapper
-
+from diffusers import DDPMPipeline
 
 def visualize_noisy_images():
     d = os.path.join(Path(__file__).parent, "data", "train")

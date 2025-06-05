@@ -67,7 +67,7 @@ class MnistDSWrapper(Dataset):
 
     def __len__(self):
         # return the length of the mnist dataset
-        return 2000
+        return 100
         # return len(self.mnist_dataset)
 
     def _pad_to_output_shape(self, image: np.ndarray) -> np.ndarray:
