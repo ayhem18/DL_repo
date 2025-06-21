@@ -23,7 +23,7 @@ def get_dataloaders(config: TransformerConfig):
     train_dataset = SyntheticSequenceClsDataset(
         max_len=config.max_len,
         num_samples=config.train_samples,
-        dim=config.dim,
+        dim=config.d_model,
         seed=config.data_seed,
         max_mean=config.max_mean,
         all_same_length=config.all_same_length
@@ -32,7 +32,7 @@ def get_dataloaders(config: TransformerConfig):
     val_dataset = SyntheticSequenceClsDataset(
         max_len=config.max_len,
         num_samples=config.val_samples,
-        dim=config.dim,
+        dim=config.d_model,
         seed=config.data_seed + 1,  # Different seed for validation
         max_mean=config.max_mean,
         all_same_length=config.all_same_length
@@ -41,7 +41,7 @@ def get_dataloaders(config: TransformerConfig):
     test_dataset = SyntheticSequenceClsDataset(
         max_len=config.max_len,
         num_samples=config.test_samples,
-        dim=config.dim,
+        dim=config.d_model,
         seed=config.data_seed + 2,  # Different seed for test
         max_mean=config.max_mean,
         all_same_length=config.all_same_length

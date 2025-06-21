@@ -9,10 +9,9 @@ class TransformerConfig:
     
     # Data parameters
     max_len: int = 32
-    dim: int = 16
-    train_samples: int = 10000
-    val_samples: int = 2000
-    test_samples: int = 2000
+    train_samples: int = 500
+    val_samples: int = 100
+    test_samples: int = 100
     all_same_length: bool = True
     max_mean: float = 3.0
     data_seed: int = 42
@@ -29,14 +28,14 @@ class TransformerConfig:
     
     # Training parameters
     batch_size: int = 64
-    epochs: int = 30
+    epochs: int = 10
     learning_rate: float = 1e-3
     weight_decay: float = 1e-4
     early_stopping_patience: int = 5
     model_seed: int = 123
     
     # Logging and output
-    log_dir: str = "runs"
+    log_parent_dir_name: str = "runs"
     experiment_name: str = "transformer_sanity_check"
     save_model: bool = True
     log_interval: int = 10  # Log every N batches

@@ -73,6 +73,10 @@ def train_epoch(model: TransformerClassifier,
     running_loss = 0.0
     total_samples = 0
 
+    # move the metrics to the device
+    for key, metric in metrics.items():
+        metrics[key] = metric.to(device)
+
     epoch_predictions = [None for _ in range(len(train_loader))]
     epoch_labels = [None for _ in range(len(train_loader))]
 
@@ -82,11 +86,27 @@ def train_epoch(model: TransformerClassifier,
         
         # Forward pass
         optimizer.zero_grad()
-        outputs = model(sequences, padding_mask)
-        
+        outputs = model.forward(sequences, padding_mask).squeeze(-1)
+
+        if torch.any(torch.isnan(outputs)):
+            print(f"NaN outputs at epoch {epoch}")
+            print(f"NaN outputs at batch {batch_idx}")
+            print(f"Outputs: {outputs}")
+            print(f"Labels: {labels}")
+            print(f"Padding mask: {padding_mask}")
+            raise ValueError("NaN outputs")
+
         # Convert to binary classification (0/1)
-        loss = criterion(outputs, labels)
+        loss = criterion.forward(outputs, labels.float())
         
+        if torch.any(torch.isnan(loss)):
+            print(f"Nan loss at epoch {epoch}")
+            print(f"NaN loss at batch {batch_idx}")
+            print(f"Outputs: {outputs}")
+            print(f"Labels: {labels}")
+            print(f"Padding mask: {padding_mask}")
+            raise ValueError("NaN loss")
+
         # Backward pass
         loss.backward()
         optimizer.step()
@@ -115,6 +135,7 @@ def train_epoch(model: TransformerClassifier,
 
         # compute the metrics for the batch
         for name, metric in metrics.items():
+
             batch_metric_value = metric(predictions, labels)
             writer.add_scalar(f"train/batch_{name}", batch_metric_value.cpu().item(), step)
             
@@ -126,7 +147,7 @@ def train_epoch(model: TransformerClassifier,
     # Compute final metrics for the epoch
     epoch_metrics = {}
     for name, metric in metrics.items():
-        epoch_metrics[f"train_epoch_{name}"] = metric(epoch_predictions, epoch_labels).cpu().item()
+        epoch_metrics[f"train_epoch_{name}"] = metric(torch.cat(epoch_predictions), torch.cat(epoch_labels)).cpu().item()
     
     return epoch_loss, epoch_metrics
 
@@ -141,6 +162,10 @@ def validation_epoch(model: TransformerClassifier,
     val_loss = 0.0
     total_samples = 0
     
+    # move the metrics to the device
+    for key, metric in metrics.items():
+        metrics[key] = metric.to(device)
+
     epoch_predictions = [None for _ in range(len(val_loader))]
     epoch_labels = [None for _ in range(len(val_loader))]
 
@@ -153,7 +178,7 @@ def validation_epoch(model: TransformerClassifier,
             outputs = model(sequences, padding_mask)
             
             # Calculate loss
-            loss = criterion(outputs, labels)
+            loss = criterion.forward(outputs, labels)
             
             # Statistics
             batch_size = labels.size(0)
@@ -170,7 +195,7 @@ def validation_epoch(model: TransformerClassifier,
     # Compute final metrics
     val_metrics = {}
     for name, metric in metrics.items():
-        val_metrics[f"val_{name}"] = metric(epoch_predictions, epoch_labels).cpu().item()
+        val_metrics[f"val_{name}"] = metric(torch.cat(epoch_predictions), torch.cat(epoch_labels)).cpu().item()
     
     # Average loss
     val_loss /= total_samples
@@ -188,6 +213,9 @@ def test(model: TransformerClassifier,
     test_loss = 0.0
     total_samples = 0
     
+    for key, metric in metrics.items():
+        metrics[key] = metric.to(device)
+
     epoch_predictions = [None for _ in range(len(test_loader))]
     epoch_labels = [None for _ in range(len(test_loader))]
     
@@ -200,7 +228,7 @@ def test(model: TransformerClassifier,
             outputs = model(sequences, padding_mask)
             
             # Calculate loss
-            loss = criterion(outputs, labels)
+            loss = criterion.forward(outputs, labels)
             
             # Statistics
             batch_size = labels.size(0)
@@ -217,7 +245,7 @@ def test(model: TransformerClassifier,
     # Compute final metrics
     test_metrics = {}
     for name, metric in metrics.items():
-        test_metrics[f"test_{name}"] = metric(epoch_predictions, epoch_labels).cpu().item()
+        test_metrics[f"test_{name}"] = metric(torch.cat(epoch_predictions), torch.cat(epoch_labels)).cpu().item()
     
     # Average loss
     test_loss /= total_samples
@@ -227,6 +255,8 @@ def test(model: TransformerClassifier,
 
 def prepare_log_directory(log_parent_dir: P) -> Tuple[P, P, P]:
     # iterate through each "run_*" directory and remove any folder that does not contain a '.json' file
+    log_parent_dir = dirf.process_path(log_parent_dir, dir_ok=True, file_ok=False, must_exist=False)
+
     for r in os.listdir(log_parent_dir):
         run_dir = False
         if os.path.isdir(os.path.join(log_parent_dir, r)):
@@ -257,7 +287,7 @@ def initialize_metrics() -> Dict[str, torchmetrics.Metric]:
     return metrics
 
 
-
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 def train_model(config: TransformerConfig):
     """Main training function."""
@@ -268,7 +298,7 @@ def train_model(config: TransformerConfig):
     pu.seed_everything(config.model_seed)
 
     # prepare the log directory
-    exp_dir, log_dir, checkpoints_dir = prepare_log_directory(config.log_parent_dir)
+    exp_dir, log_dir, checkpoints_dir = prepare_log_directory(os.path.join(SCRIPT_DIR, config.log_parent_dir_name))
 
     # Create tensorboard writer
     writer = SummaryWriter(log_dir=log_dir)
@@ -285,7 +315,7 @@ def train_model(config: TransformerConfig):
         num_heads=config.num_heads,
         value_dim=config.value_dim,
         key_dim=config.key_dim,
-        num_classes=1,  # Binary classification
+        num_classes=2,
         pooling=config.pooling,
         dropout=config.dropout
     )

@@ -108,7 +108,7 @@ def main():
     
     # Create config and update with args
     config = TransformerConfig()
-    config = update_config_from_args(config, args)
+    # config = update_config_from_args(config, args)
     
     # Print configuration
     print("\nConfiguration:")
