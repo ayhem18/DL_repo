@@ -11,7 +11,7 @@ from torch.optim.lr_scheduler import LinearLR, SequentialLR, CosineAnnealingLR
 from torch.utils.data import DataLoader
 
 
-from mypt.losses.simClrLoss import SimClrLoss
+from mypt.losses.simcls_loss import SimClrLoss
 from mypt.code_utilities import pytorch_utilities as pu, directories_and_files as dirf
 from mypt.schedulers.annealing_lr import AnnealingLR
 from mypt.models.simClr.simClrModel import SimClrModel

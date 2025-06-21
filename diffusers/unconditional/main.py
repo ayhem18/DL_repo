@@ -25,6 +25,7 @@ from config import ModelConfig, OptimizerConfig, TrainingConfig
 
 
 
+
 SCRIPT_DIR = Path(__file__).parent
 current_dir = SCRIPT_DIR
 while 'data' not in os.listdir(current_dir):
