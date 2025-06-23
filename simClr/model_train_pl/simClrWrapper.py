@@ -9,7 +9,7 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 from pytorch_lightning import LightningModule
 from clearml import Logger
 
-from mypt.losses.simcls_loss import SimClrLoss
+from mypt.losses.simclr_loss import SimClrLoss
 from mypt.code_utilities import pytorch_utilities as pu
 from mypt.models.simClr.simClrModel import SimClrModel, ResnetSimClr
 from mypt.similarities.cosineSim import CosineSim

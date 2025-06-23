@@ -10,7 +10,7 @@ from typing import Tuple, Union, Optional
 
 from mypt.models.simClr.simClrModel import SimClrModel
 from mypt.code_utilities import pytorch_utilities as pu
-from mypt.losses.simcls_loss import SimClrLoss
+from mypt.losses.simclr_loss import SimClrLoss
 from mypt.similarities.cosineSim import CosineSim
 
 def train_per_batch(model: SimClrModel,

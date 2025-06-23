@@ -1,11 +1,21 @@
 import os
 import sys
-import argparse
+import time
 import torch
+import shutil
+import argparse
 
+from typing import Tuple
+
+from train import run_experiment
 from config import TransformerConfig
-from train import train_model
 
+from mypt.shortcuts import P
+from mypt.code_utils import directories_and_files as dirf
+from mypt.loggers import get_logger, BaseLogger
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+WANDB_PROJECT = "transformer_classifier"
 
 def parse_args():
     """Parse command line arguments."""
@@ -92,6 +102,56 @@ def update_config_from_args(config: TransformerConfig, args: argparse.Namespace)
     return config
 
 
+
+def prepare_log_directory(log_parent_dir: P) -> Tuple[P, P, P, int]:
+    # iterate through each "run_*" directory and remove any folder that does not contain a '.json' file
+    log_parent_dir = dirf.process_path(log_parent_dir, dir_ok=True, file_ok=False, must_exist=False)
+
+    for r in os.listdir(log_parent_dir):
+        run_dir = False
+        if os.path.isdir(os.path.join(log_parent_dir, r)):
+            for file in os.listdir(os.path.join(log_parent_dir, r)):
+                if os.path.splitext(file)[-1] == '.json':
+                    run_dir = True
+                    break
+            
+            if not run_dir:
+                shutil.rmtree(os.path.join(log_parent_dir, r))
+
+
+    run_number = len(os.listdir(log_parent_dir)) + 1
+    exp_dir = dirf.process_path(os.path.join(log_parent_dir, f'run_{run_number}'), dir_ok=True, file_ok=False)
+    log_dir = dirf.process_path(os.path.join(exp_dir, "logs"), dir_ok=True, file_ok=False, must_exist=False)
+    checkpoints_dir = dirf.process_path(os.path.join(exp_dir, "checkpoints"), dir_ok=True, file_ok=False, must_exist=False)
+
+    return exp_dir, log_dir, checkpoints_dir, run_number
+
+
+def set_up_logger(config: TransformerConfig) -> Tuple[BaseLogger, BaseLogger, P, P, P]:
+    # prepare the log directory
+    exp_dir, log_dir, checkpoints_dir, run_number = prepare_log_directory(os.path.join(SCRIPT_DIR, config.log_parent_dir_name))
+
+    # Create logger
+    log_kwargs = {
+        "log_dir": log_dir,
+    }
+    
+    if config.logger_name == 'wandb':
+        log_kwargs["project"] = WANDB_PROJECT
+        # the run name is run_run_number + the date and time
+        log_kwargs["run_name"] = f"run_{run_number}_{time.strftime('%m%d_%H%M%S')}"
+
+
+    metrics_logger = get_logger(config.logger_name, **log_kwargs) 
+
+    # configs_logger will log to the "exp_dir" directory
+    log_kwargs['log_dir'] = exp_dir
+    configs_logger = get_logger(config.logger_name, **log_kwargs) 
+    
+
+    return configs_logger, metrics_logger, exp_dir, log_dir, checkpoints_dir
+
+
 def main():
     """Main entry point."""
     # Parse arguments
@@ -116,17 +176,18 @@ def main():
         print(f"  {key}: {value}")
     
     # Train model
-    model, results = train_model(config)
+    try:
+        configs_logger, metrics_logger, exp_dir, log_dir, checkpoints_dir = set_up_logger(config)
+        
+        model, results = run_experiment(config, configs_logger, metrics_logger, checkpoints_dir)
     
-    # Print final results
-    print("\nFinal Results:")
-    print(f"  Train Loss: {results['train_loss']:.4f}, Train Acc: {results['train_acc']:.2f}%")
-    print(f"  Val Loss: {results['val_loss']:.4f}, Val Acc: {results['val_acc']:.2f}%")
-    print(f"  Test Loss: {results['test_loss']:.4f}, Test Acc: {results['test_acc']:.2f}%")
-    print(f"  Total Training Time: {results['total_time']:.2f}s")
+    except Exception as e:
+        configs_logger.close()
+        metrics_logger.close()
+        raise e
     
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()
