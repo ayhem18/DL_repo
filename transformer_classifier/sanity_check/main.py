@@ -1,5 +1,4 @@
 import os
-import sys
 import time
 import torch
 import shutil
@@ -7,12 +6,13 @@ import argparse
 
 from typing import Tuple
 
+from DL_repo.transformer_classifier.sanity_check.model_config import get_model_config
 from train import run_experiment
-from config import TransformerConfig
+from config import DataConfig, ExperimentConfig, TrainingConfig, TransformerConfig
 
 from mypt.shortcuts import P
 from mypt.code_utils import directories_and_files as dirf
-from mypt.loggers import get_logger, BaseLogger
+from mypt.loggers import get_logger, BaseLogger 
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 WANDB_PROJECT = "transformer_classifier"
@@ -21,6 +21,8 @@ def parse_args():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(description='Train a Transformer classifier on synthetic sequence data')
     
+    parser.add_argument('--model-type', type=str, default='pytorch_transformer', choices=['my_transformer', 'pytorch_transformer'], help='Model type')
+
     # Data parameters
     parser.add_argument('--max-len', type=int, default=32, help='Maximum sequence length')
     parser.add_argument('--dim', type=int, default=16, help='Feature dimension of each token')
@@ -127,26 +129,26 @@ def prepare_log_directory(log_parent_dir: P) -> Tuple[P, P, P, int]:
     return exp_dir, log_dir, checkpoints_dir, run_number
 
 
-def set_up_logger(config: TransformerConfig) -> Tuple[BaseLogger, BaseLogger, P, P, P]:
+def set_up_logger(exp_config: ExperimentConfig) -> Tuple[BaseLogger, BaseLogger, P, P, P]:
     # prepare the log directory
-    exp_dir, log_dir, checkpoints_dir, run_number = prepare_log_directory(os.path.join(SCRIPT_DIR, config.log_parent_dir_name))
+    exp_dir, log_dir, checkpoints_dir, run_number = prepare_log_directory(os.path.join(SCRIPT_DIR, exp_config.log_parent_dir_name))
 
     # Create logger
     log_kwargs = {
         "log_dir": log_dir,
     }
     
-    if config.logger_name == 'wandb':
+    if exp_config.logger_name == 'wandb':
         log_kwargs["project"] = WANDB_PROJECT
         # the run name is run_run_number + the date and time
         log_kwargs["run_name"] = f"run_{run_number}_{time.strftime('%m%d_%H%M%S')}"
 
 
-    metrics_logger = get_logger(config.logger_name, **log_kwargs) 
+    metrics_logger = get_logger(exp_config.logger_name, **log_kwargs) 
 
     # configs_logger will log to the "exp_dir" directory
     log_kwargs['log_dir'] = exp_dir
-    configs_logger = get_logger(config.logger_name, **log_kwargs) 
+    configs_logger = get_logger(exp_config.logger_name, **log_kwargs) 
     
 
     return configs_logger, metrics_logger, exp_dir, log_dir, checkpoints_dir
@@ -166,20 +168,26 @@ def main():
     
     print(f"Using device: {device}")
     
-    # Create config and update with args
-    config = TransformerConfig()
-    # config = update_config_from_args(config, args)
-    
-    # Print configuration
-    print("\nConfiguration:")
-    for key, value in config.to_dict().items():
-        print(f"  {key}: {value}")
+
+    # get the necessary configs
+    exp_config = ExperimentConfig()
+    data_config = DataConfig()
+    model_config = get_model_config(args.model_type)
+    training_config = TrainingConfig()
+
     
     # Train model
     try:
-        configs_logger, metrics_logger, exp_dir, log_dir, checkpoints_dir = set_up_logger(config)
+        configs_logger, metrics_logger, exp_dir, log_dir, checkpoints_dir = set_up_logger(exp_config)
         
-        model, results = run_experiment(config, configs_logger, metrics_logger, checkpoints_dir)
+        model, results = run_experiment(model_config, 
+                                        training_config,
+                                        data_config,
+                                        exp_config,
+                                        
+                                        configs_logger, 
+                                        metrics_logger, 
+                                        checkpoints_dir)
     
     except Exception as e:
         configs_logger.close()

@@ -16,8 +16,9 @@ from mypt.code_utils import pytorch_utils as pu
 from mypt.code_utils import directories_and_files as dirf
 from mypt.nets.transformers.transformer_classifier import TransformerClassifier
 
-from config import TransformerConfig
 from data import get_dataloaders, prepare_batch
+from config import DataConfig, ExperimentConfig, TrainingConfig
+from model_config import MyTransformerModelConfig, PytorchTransformerModelConfig, get_model
 
 
 
@@ -41,12 +42,16 @@ class EarlyStopping:
         if self.best_score is None:
             self.best_score = score
             self.save_checkpoint(val_loss, model)
+
         elif score < self.best_score + self.delta:
             self.counter += 1
             if self.verbose:
                 print(f'EarlyStopping counter: {self.counter} out of {self.patience}')
-            if self.counter >= self.patience:
+
+            # self.patience can be less than 1, which means no early stopping
+            if self.patience >= 1 and self.counter >= self.patience:
                 self.early_stop = True
+
         else:
             self.best_score = score
             self.save_checkpoint(val_loss, model)
@@ -67,7 +72,7 @@ def train_epoch(model: TransformerClassifier,
                 device: torch.device, 
                 epoch: int, 
                 logger: BaseLogger, 
-                config: TransformerConfig,
+                exp_config: ExperimentConfig,
                 metrics: Dict[str, torchmetrics.Metric]) -> Tuple[float, Dict[str, float]]:
     """Train for one epoch."""
     model.train()
@@ -89,25 +94,8 @@ def train_epoch(model: TransformerClassifier,
         optimizer.zero_grad()
         outputs = model.forward(sequences, padding_mask).squeeze(-1)
 
-        if torch.any(torch.isnan(outputs)):
-            print(f"NaN outputs at epoch {epoch}")
-            print(f"NaN outputs at batch {batch_idx}")
-            print(f"Outputs: {outputs}")
-            print(f"Labels: {labels}")
-            print(f"Padding mask: {padding_mask}")
-            raise ValueError("NaN outputs")
-
         # Convert to binary classification (0/1)
         loss = criterion.forward(outputs, labels.float())
-        
-        if torch.any(torch.isnan(loss)):
-            print(f"Nan loss at epoch {epoch}")
-            print(f"NaN loss at batch {batch_idx}")
-            print(f"Outputs: {outputs}")
-            print(f"Labels: {labels}")
-            print(f"Padding mask: {padding_mask}")
-            raise ValueError("NaN loss")
-
         # Backward pass
         loss.backward()
         optimizer.step()
@@ -124,7 +112,7 @@ def train_epoch(model: TransformerClassifier,
         epoch_predictions[batch_idx] = predictions
         epoch_labels[batch_idx] = labels
 
-        if batch_idx % config.log_interval != 0:
+        if batch_idx % exp_config.log_interval != 0:
             continue
 
         # Log batch results        
@@ -155,7 +143,7 @@ def validation_epoch(model: TransformerClassifier,
              criterion: nn.Module, 
              device: torch.device,
              logger: BaseLogger,
-             config: TransformerConfig,
+             exp_config: ExperimentConfig,
              metrics: Dict[str, torchmetrics.Metric],
              epoch: int) -> Tuple[float, Dict[str, float]]:
     """Validate the model."""
@@ -193,7 +181,7 @@ def validation_epoch(model: TransformerClassifier,
             epoch_predictions[batch_idx] = predictions
             epoch_labels[batch_idx] = labels
 
-            if batch_idx % config.log_interval != 0:
+            if batch_idx % exp_config.log_interval != 0:
                 continue
 
             # Log batch results        
@@ -284,7 +272,7 @@ def initialize_metrics() -> Dict[str, torchmetrics.Metric]:
 def train_model(
                 # model arguments   
                 model: TransformerClassifier, 
-                config: TransformerConfig, 
+                training_config: TrainingConfig, 
                 metrics: Dict[str, torchmetrics.Metric],
                 
                 # data arguments
@@ -301,19 +289,19 @@ def train_model(
                 log_checkpoints_dir: P
                 ) -> Tuple[List[float], Dict[str, float]]: 
     
-    run_train_losses = [None for _ in range(config.epochs)]
+    run_train_losses = [None for _ in range(training_config.epochs)]
     run_train_metrics = defaultdict(list)
 
-    run_val_losses = [None for _ in range(config.epochs)]
+    run_val_losses = [None for _ in range(training_config.epochs)]
     run_val_metrics = defaultdict(list)
 
     # save the starting time
     start_time = time.time()
 
-    for epoch in tqdm(range(1, config.epochs + 1), desc="Training"):
+    for epoch in tqdm(range(1, training_config.epochs + 1), desc="Training"):
         
         # Train
-        epoch_train_loss, epoch_train_metrics = train_epoch(model, train_loader, criterion, optimizer, device, epoch, logger, config, metrics)
+        epoch_train_loss, epoch_train_metrics = train_epoch(model, train_loader, criterion, optimizer, device, epoch, logger, training_config, metrics)
 
         # Log
         logger.log_scalar('train/epoch_loss', epoch_train_loss, epoch)        
@@ -327,7 +315,7 @@ def train_model(
             run_train_metrics[name].append(value)
 
         # Validate
-        epoch_val_loss, epoch_val_metrics = validation_epoch(model, val_loader, criterion, device, logger, config, metrics, epoch)
+        epoch_val_loss, epoch_val_metrics = validation_epoch(model, val_loader, criterion, device, logger, training_config, metrics, epoch)
 
         # Log
         logger.log_scalar('val/epoch_loss', epoch_val_loss, epoch)        
@@ -382,7 +370,10 @@ def test_model(model: TransformerClassifier,
 
 
 
-def run_experiment(config: TransformerConfig, 
+def run_experiment(model_config: MyTransformerModelConfig | PytorchTransformerModelConfig, 
+                   training_config: TrainingConfig,
+                   data_config: DataConfig,
+                   exp_config: ExperimentConfig,
                    configs_logger: BaseLogger,
                    metrics_logger: BaseLogger, 
                    log_checkpoints_dir: P):
@@ -391,43 +382,41 @@ def run_experiment(config: TransformerConfig,
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
     
-    pu.seed_everything(config.model_seed)
+    pu.seed_everything(exp_config.model_seed)
 
     # Get data loaders
-    train_loader, val_loader, test_loader = get_dataloaders(config)
+    train_loader, val_loader, test_loader = get_dataloaders(data_config)
     
     # Create model
-    model = TransformerClassifier(
-        d_model=config.d_model,
-        num_transformer_blocks=config.num_transformer_blocks,
-        num_classification_layers=config.num_classification_layers,
-        num_heads=config.num_heads,
-        value_dim=config.value_dim,
-        key_dim=config.key_dim,
-        num_classes=2,
-        pooling=config.pooling,
-        dropout=config.dropout
-    )
+    model = get_model(model_config, num_classes=2)
     model = model.to(device)
     
     # Define loss and optimizer
     criterion = nn.BCEWithLogitsLoss()
-    optimizer = optim.Adam(model.parameters(), lr=config.learning_rate, weight_decay=config.weight_decay)
+    optimizer = optim.Adam(model.parameters(), lr=training_config.learning_rate, weight_decay=training_config.weight_decay)
     
     # Initialize metrics
     metrics = initialize_metrics()
     
-    early_stopping = EarlyStopping(path_dir=log_checkpoints_dir, patience=config.early_stopping_patience, verbose=True)
+    early_stopping = EarlyStopping(path_dir=log_checkpoints_dir, patience=training_config.early_stopping_patience, verbose=True)
     
     # Training loop
     run_train_losses, run_train_metrics, run_val_losses, run_val_metrics = train_model(
-        model, config, metrics, train_loader, val_loader, criterion, optimizer, early_stopping, metrics_logger, device, log_checkpoints_dir
+        model, training_config, metrics, train_loader, val_loader, criterion, optimizer, early_stopping, metrics_logger, device, log_checkpoints_dir
     )
 
     # Load best model
     model.load_state_dict(torch.load(early_stopping.path))
     
-    configs_logger.log_config(config.to_dict(), 'config')
+    # merge all configs into a single dictionary
+    all_configs = {
+        'exp_config': exp_config.to_dict(),
+        'training_config': training_config.to_dict(),
+        'data_config': data_config.to_dict(),
+        'model_config': model_config.to_dict()
+    }
+
+    configs_logger.log_config(all_configs, 'config')
 
     # run it on the test set
     test_loss, test_metrics = test_model(model, test_loader, criterion, device, metrics, metrics_logger)
