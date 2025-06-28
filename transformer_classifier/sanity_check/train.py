@@ -273,6 +273,7 @@ def train_model(
                 # model arguments   
                 model: TransformerClassifier, 
                 training_config: TrainingConfig, 
+                exp_config: ExperimentConfig,
                 metrics: Dict[str, torchmetrics.Metric],
                 
                 # data arguments
@@ -301,7 +302,7 @@ def train_model(
     for epoch in tqdm(range(1, training_config.epochs + 1), desc="Training"):
         
         # Train
-        epoch_train_loss, epoch_train_metrics = train_epoch(model, train_loader, criterion, optimizer, device, epoch, logger, training_config, metrics)
+        epoch_train_loss, epoch_train_metrics = train_epoch(model, train_loader, criterion, optimizer, device, epoch, logger, exp_config, metrics)
 
         # Log
         logger.log_scalar('train/epoch_loss', epoch_train_loss, epoch)        
@@ -315,7 +316,7 @@ def train_model(
             run_train_metrics[name].append(value)
 
         # Validate
-        epoch_val_loss, epoch_val_metrics = validation_epoch(model, val_loader, criterion, device, logger, training_config, metrics, epoch)
+        epoch_val_loss, epoch_val_metrics = validation_epoch(model, val_loader, criterion, device, logger, exp_config, metrics, epoch)
 
         # Log
         logger.log_scalar('val/epoch_loss', epoch_val_loss, epoch)        
@@ -402,7 +403,7 @@ def run_experiment(model_config: MyTransformerModelConfig | PytorchTransformerMo
     
     # Training loop
     run_train_losses, run_train_metrics, run_val_losses, run_val_metrics = train_model(
-        model, training_config, metrics, train_loader, val_loader, criterion, optimizer, early_stopping, metrics_logger, device, log_checkpoints_dir
+        model, training_config, exp_config, metrics, train_loader, val_loader, criterion, optimizer, early_stopping, metrics_logger, device, log_checkpoints_dir
     )
 
     # Load best model

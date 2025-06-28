@@ -6,13 +6,14 @@ import argparse
 
 from typing import Tuple
 
-from DL_repo.transformer_classifier.sanity_check.model_config import get_model_config
 from train import run_experiment
-from config import DataConfig, ExperimentConfig, TrainingConfig, TransformerConfig
+from model_config import get_model_config
+from config import DataConfig, ExperimentConfig, TrainingConfig, GeneralConfig
 
 from mypt.shortcuts import P
 from mypt.code_utils import directories_and_files as dirf
 from mypt.loggers import get_logger, BaseLogger 
+
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 WANDB_PROJECT = "transformer_classifier"
@@ -64,44 +65,44 @@ def parse_args():
     return parser.parse_args()
 
 
-def update_config_from_args(config: TransformerConfig, args: argparse.Namespace):
-    """Update configuration from command-line arguments."""
-    # Data parameters
-    config.max_len = args.max_len
-    config.dim = args.dim
-    config.train_samples = args.train_samples
-    config.val_samples = args.val_samples
-    config.test_samples = args.test_samples
-    config.all_same_length = args.all_same_length
-    config.max_mean = args.max_mean
-    config.data_seed = args.data_seed
+# def update_config_from_args(config: GeneralConfig, args: argparse.Namespace):
+#     """Update configuration from command-line arguments."""
+#     # Data parameters
+#     config.max_len = args.max_len
+#     config.dim = args.dim
+#     config.train_samples = args.train_samples
+#     config.val_samples = args.val_samples
+#     config.test_samples = args.test_samples
+#     config.all_same_length = args.all_same_length
+#     config.max_mean = args.max_mean
+#     config.data_seed = args.data_seed
     
-    # Model parameters
-    config.d_model = args.d_model
-    config.num_heads = args.num_heads
-    config.key_dim = args.key_dim
-    config.value_dim = args.value_dim
-    config.num_transformer_blocks = args.num_transformer_blocks
-    config.num_classification_layers = args.num_classification_layers
-    config.dropout = args.dropout
-    config.pooling = args.pooling
+#     # Model parameters
+#     config.d_model = args.d_model
+#     config.num_heads = args.num_heads
+#     config.key_dim = args.key_dim
+#     config.value_dim = args.value_dim
+#     config.num_transformer_blocks = args.num_transformer_blocks
+#     config.num_classification_layers = args.num_classification_layers
+#     config.dropout = args.dropout
+#     config.pooling = args.pooling
     
-    # Training parameters
-    config.batch_size = args.batch_size
-    config.epochs = args.epochs
-    config.learning_rate = args.lr
-    config.weight_decay = args.weight_decay
-    config.early_stopping_patience = args.early_stopping_patience
-    config.model_seed = args.model_seed
+#     # Training parameters
+#     config.batch_size = args.batch_size
+#     config.epochs = args.epochs
+#     config.learning_rate = args.lr
+#     config.weight_decay = args.weight_decay
+#     config.early_stopping_patience = args.early_stopping_patience
+#     config.model_seed = args.model_seed
     
-    # Logging and output
-    config.log_dir = args.log_dir
-    config.experiment_name = args.experiment_name
-    config.save_model = not args.no_save_model
-    config.log_interval = args.log_interval
+#     # Logging and output
+#     config.log_dir = args.log_dir
+#     config.experiment_name = args.experiment_name
+#     config.save_model = not args.no_save_model
+#     config.log_interval = args.log_interval
     
 
-    return config
+#     return config
 
 
 
@@ -175,7 +176,8 @@ def main():
     model_config = get_model_config(args.model_type)
     training_config = TrainingConfig()
 
-    
+    assert model_config.d_model == data_config.dim, "The data is fed directly to the model, so the dimensions must match"
+
     # Train model
     try:
         configs_logger, metrics_logger, exp_dir, log_dir, checkpoints_dir = set_up_logger(exp_config)

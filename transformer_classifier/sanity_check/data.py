@@ -4,11 +4,11 @@ import torch
 # Add the path to the pytorch_modular package
 # sys.path.append(os.path.join(os.path.dirname(__file__), '../../../ML/pytorch_modular/src'))
 
-from config import TransformerConfig
+from config import DataConfig
 from mypt.data.datasets.synthetic.sequence.sequence_cls import SyntheticSequenceClsDataset
 from mypt.data.dataloaders.standard_dataloaders import initialize_train_dataloader, initialize_val_dataloader
 
-def get_dataloaders(config: TransformerConfig):
+def get_dataloaders(config: DataConfig):
     """
     Create train, validation, and test dataloaders from synthetic sequence data.
     
@@ -23,7 +23,7 @@ def get_dataloaders(config: TransformerConfig):
     train_dataset = SyntheticSequenceClsDataset(
         max_len=config.max_len,
         num_samples=config.train_samples,
-        dim=config.d_model,
+        dim=config.dim,
         seed=config.data_seed,
         max_mean=config.max_mean,
         all_same_length=config.all_same_length
@@ -32,7 +32,7 @@ def get_dataloaders(config: TransformerConfig):
     val_dataset = SyntheticSequenceClsDataset(
         max_len=config.max_len,
         num_samples=config.val_samples,
-        dim=config.d_model,
+        dim=config.dim,
         seed=config.data_seed + 1,  # Different seed for validation
         max_mean=config.max_mean,
         all_same_length=config.all_same_length
@@ -41,7 +41,7 @@ def get_dataloaders(config: TransformerConfig):
     test_dataset = SyntheticSequenceClsDataset(
         max_len=config.max_len,
         num_samples=config.test_samples,
-        dim=config.d_model,
+        dim=config.dim,
         seed=config.data_seed + 2,  # Different seed for test
         max_mean=config.max_mean,
         all_same_length=config.all_same_length
@@ -91,18 +91,3 @@ def prepare_batch(batch: tuple[torch.Tensor, torch.Tensor],
     return sequences, labels, padding_mask
 
 
-if __name__ == "__main__":
-    # Test data loading
-    config = TransformerConfig()
-    train_loader, val_loader, test_loader = get_dataloaders(config)
-    
-    # Check a few batches
-    for i, batch in enumerate(train_loader):
-        sequences, labels = batch
-        print(f"Batch {i+1}:")
-        print(f"  Sequences shape: {sequences.shape}")
-        print(f"  Labels shape: {labels.shape}")
-        print(f"  Labels distribution: {torch.bincount(labels)}")
-        
-        if i >= 2:  # Just check a few batches
-            break

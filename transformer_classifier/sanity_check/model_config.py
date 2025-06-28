@@ -1,12 +1,10 @@
-import torch
-
 from dataclasses import dataclass
 
 from mypt.nets.transformers.transformer_classifier import TransformerClassifier
 
 
 from config import GeneralConfig
-from DL_repo.transformer_classifier.sanity_check.torch_transformer_classifier import PytorchTransformerClassifier
+from torch_transformer_classifier import PytorchTransformerClassifier
 
 
 class GeneralModelConfig(GeneralConfig):
@@ -51,7 +49,7 @@ def get_model_config(model_type: str) -> GeneralModelConfig:
     """Get the model config based on the model type."""
     for model_config in [MyTransformerModelConfig, PytorchTransformerModelConfig]:
         if model_config.model_type == model_type:
-            return model_config
+            return model_config()
         
     raise ValueError(f"Invalid model type: {model_type}")
 

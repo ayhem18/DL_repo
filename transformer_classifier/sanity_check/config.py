@@ -19,12 +19,13 @@ class DataConfig(GeneralConfig):
     max_mean: float = 100
     all_same_length: bool = True
     data_seed: int = 42
+    dim: int = 64
+    batch_size: int = 128
 
 
 @dataclass
 class TrainingConfig(GeneralConfig):
     """Configuration for the training."""
-    batch_size: int = 128
     epochs: int = 500
     learning_rate: float = 1e-3
     weight_decay: float = 1e-4
