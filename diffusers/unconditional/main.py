@@ -9,13 +9,12 @@ from pathlib import Path
 from typing import Tuple, Union
 from diffusers import DDPMScheduler
 
-from torch.utils.tensorboard import SummaryWriter
 from torch.utils.data import DataLoader, Dataset
 
 
 from mypt.shortcuts import P
+from mypt.loggers import get_logger
 from mypt.code_utils import directories_and_files as dirf
-from mypt.nets.conv_nets.diffusion_unet.wrapper.diffusion_unet import DiffusionUNet
 from mypt.data.dataloaders.standard_dataloaders import initialize_train_dataloader, initialize_val_dataloader
 
 
@@ -101,18 +100,28 @@ from diffusers import UNet2DModel
 # one that uses the diffusers implementation of the diffusion unet
 def set_model(config: ModelConfig) -> UNet2DModel:
     
-    # let's use the default model for now.
     model = UNet2DModel(
         sample_size=config.input_shape[1:],
         in_channels=config.input_shape[0],
         out_channels=config.input_shape[0],
+        block_out_channels=(128, 128),
+        down_block_types=("DownBlock2D", "DownBlock2D"), # let's see how this turns out without attention blocks
+        up_block_types=("UpBlock2D", "UpBlock2D"), # let's see how this turns out without attention blocks
+        time_embedding_dim=128,
+    )
+
+    # # let's use the default model for now.
+    # model = UNet2DModel(
+    #     sample_size=config.input_shape[1:],
+    #     in_channels=config.input_shape[0],
+    #     out_channels=config.input_shape[0],
 
         # layers_per_block=3,
         # block_out_channels=(32, 64, 128),
         # down_block_types=("DownBlock2D", "DownBlock2D", "DownBlock2D"),
         # up_block_types=("UpBlock2D", "UpBlock2D", "UpBlock2D"),
         # block_out_channels=(32, 64, 128),
-    )
+    # )
 
 
 
@@ -121,22 +130,22 @@ def set_model(config: ModelConfig) -> UNet2DModel:
 
 # a function using my own implementation of the diffusion unet
 
-def set_model(config: ModelConfig) -> DiffusionUNet:
+# def set_model(config: ModelConfig) -> DiffusionUNet:
 
-    model = DiffusionUNet(input_channels=config.input_shape[0],
-                          output_channels=config.input_shape[0],
-                          cond_dimension=256,                          
-                          )
+#     model = DiffusionUNet(input_channels=config.input_shape[0],
+#                           output_channels=config.input_shape[0],
+#                           cond_dimension=256,                          
+#                           )
     
-    # the default model reaches a training loss of 0.01 in less than 10 epochs
-    # let's try to use a model with a similar capacity: it uses attention blocks which aren't currently implemented 
-    # however, let's match the number of blocks + the number of channels. 
+#     # the default model reaches a training loss of 0.01 in less than 10 epochs
+#     # let's try to use a model with a similar capacity: it uses attention blocks which aren't currently implemented 
+#     # however, let's match the number of blocks + the number of channels. 
 
-    model.build_down_block(num_down_layers=4, num_res_blocks=3, out_channels=[256, 512, 1024, 1024], downsample_types="conv")
-    model.build_middle_block(num_res_blocks=3)
-    model.build_up_block(num_res_blocks=3, upsample_types="transpose_conv")
+#     model.build_down_block(num_down_layers=4, num_res_blocks=3, out_channels=[256, 512, 1024, 1024], downsample_types="conv")
+#     model.build_middle_block(num_res_blocks=3)
+#     model.build_up_block(num_res_blocks=3, upsample_types="transpose_conv")
 
-    return model
+#     return model
 
 
 from diffusers.optimization import get_cosine_schedule_with_warmup
@@ -144,6 +153,9 @@ from diffusers.optimization import get_cosine_schedule_with_warmup
 
 
 def main():
+    from mypt.code_utils import pytorch_utils as pu
+    pu.seed_everything(42)
+    
     model_config = ModelConfig()
     opt_config = OptimizerConfig()
     train_config = TrainingConfig() 
@@ -161,7 +173,7 @@ def main():
 
     # Initialize TensorBoard writer
     exp_log_dir = prepare_log_directory()
-    writer = SummaryWriter(os.path.join(exp_log_dir, 'logs'))
+    logger = get_logger('tensorboard', log_dir=os.path.join(exp_log_dir, 'logs'))
 
     # the parameters of the noise scheduler were set by playing around with the noise scheduler and visualizing the results.
     # check the sanity_checks.py file for more details.
@@ -188,9 +200,10 @@ def main():
         lr_scheduler=lr_scheduler,
         num_epochs=train_config.num_epochs,
         device=device, 
-        writer=writer,
+        logger=logger,
         log_dir=exp_log_dir,
-        debug=False
+        debug=False,
+        val_per_epoch=10 
     )
     
     # Save the final model
@@ -211,4 +224,3 @@ if __name__ == '__main__':
     # main(checkpoint_path)
     main()
         
-

@@ -51,8 +51,8 @@ class OptimizerConfig(Config):
 
 @dataclass
 class TrainingConfig(Config):
-    train_batch_size: int = 4
-    val_batch_size: int = 2
-    num_epochs: int =50    
+    train_batch_size: int = 8
+    val_batch_size: int = 4
+    num_epochs: int = 100
     seed: int = 42
 
