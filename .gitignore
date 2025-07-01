@@ -45,3 +45,6 @@ diffusers/samples/
 *.gz
 *-ubyte
 
+# safetensors
+*.safetensors
+

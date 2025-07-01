@@ -7,7 +7,7 @@ import albumentations as A
 
 from pathlib import Path
 from typing import Tuple, Union
-from diffusers import DDPMScheduler
+from diffusers import DDPMScheduler, DDPMPipeline
 
 from torch.utils.data import DataLoader, Dataset
 
@@ -206,21 +206,38 @@ def main():
         val_per_epoch=10 
     )
     
-    # Save the final model
-    model_path = os.path.join(exp_log_dir, 'final_model.pth')
-    torch.save(trained_model.state_dict(), model_path)
-    
+    # save the model in a way that can be loaded by the diffusers library
+    if isinstance (model, UNet2DModel):
+        pipeline = DDPMPipeline(unet=trained_model, scheduler=noise_scheduler)
+        pipeline.save_pretrained(os.path.join(exp_log_dir, 'model')) 
+        return 
+
+    # save custom model 
     # Save the config
     model_config.save(os.path.join(exp_log_dir, 'model_config.json'))
     opt_config.save(os.path.join(exp_log_dir, 'opt_config.json'))
-    # train_config.save(os.path.join(exp_log_dir, 'train_config.json'))
-    
-    # Clean up temporary directories    
     print("Training completed!")
+
+
+from mypt.visualization.general import visualize
+
+
+def inference(folder_path: P, num_samples: int = 20, num_inference_steps: int = 250):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    pipeline = DDPMPipeline.from_pretrained(folder_path)
+    pipeline.to(device)
+    images = pipeline(batch_size=num_samples, num_inference_steps=num_inference_steps).images
+    
+    for i, im in enumerate(images):
+        visualize(im, window_name=f"sampled_image_{i}")
+    
+    return images
+
 
 if __name__ == '__main__':
     # try to make it work with a checkpoint path
-    checkpoint_path = os.path.join(SCRIPT_DIR, 'runs', 'run_1')
-    # main(checkpoint_path)
-    main()
-        
+    # checkpoint_path = os.path.join(SCRIPT_DIR, 'runs', 'run_1')
+    # # main(checkpoint_path)
+    # main()
+    checkpoint_path = os.path.join(SCRIPT_DIR, 'runs', 'run_2', 'model')
+    inference(checkpoint_path)

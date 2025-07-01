@@ -214,7 +214,7 @@ def sample_with_diffusers(model: UNet2DModel,
     ).images
 
     # convert to tensor and return
-    return torch.from_numpy(images.transpose(0, 3, 1, 2))
+    return torch.from_numpy(images.transpose(0, 3, 1, 2)) / 255.0
 
 
 def sample_manual(model: DiffusionUNet, 
