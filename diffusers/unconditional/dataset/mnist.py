@@ -32,12 +32,23 @@ class MnistDSWrapper(Dataset):
                  unconditional: bool = False):
         
         # use a wrapper of the mnist dataset 
-        self.mnist_dataset = datasets.MNIST(
-            root=root,
-            train=train,
-            download=not os.path.exists(root),
-            transform=None  # We'll apply transforms ourselves
-        )
+        try:
+            self.mnist_dataset = datasets.MNIST(
+                root=root,
+                train=train,
+                download=not os.path.exists(root),
+                transform=None  # We'll apply transforms ourselves
+            )
+        except RuntimeError as e:
+            if "dataset not found" in str(e).lower():
+                self.mnist_dataset = datasets.MNIST(
+                    root=root,
+                    train=train,
+                    download=True,
+                    transform=None  # We'll apply transforms ourselves
+                )
+            else:
+                raise e
         
         # Store parameters
         transforms = transforms or [] # default to an empty list
@@ -126,8 +137,11 @@ class MnistDSWrapper(Dataset):
         # Convert PIL Image to numpy array
         image_np = np.array(image) / 255.0
         
-        # Pad image to output shape
-        padded_image = self._pad_to_output_shape(image_np)
+        # only the image if the dimensions do not match 
+        if image_np.shape != self.output_shape:
+            padded_image = self._pad_to_output_shape(image_np)
+        else:   
+            padded_image = image_np
         
         # Create a binary mask from the padded image (1 where digit, 0 elsewhere)
         binary_mask = (padded_image > 0).astype(np.float32)

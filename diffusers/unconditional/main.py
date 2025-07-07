@@ -41,12 +41,12 @@ def set_data(model_config: ModelConfig,
     val_data_path = os.path.join(SCRIPT_DIR, 'data', 'val')
 
     train_transforms = [
-        A.RandomResizedCrop(size=model_config.input_shape[1:], scale=(0.4, 1)),
+        A.RandomResizedCrop(size=model_config.input_shape[1:], scale=(0.8, 1)),
         A.ToTensorV2()
     ]
     
     val_transforms = [
-        A.RandomResizedCrop(size=model_config.input_shape[1:], scale=(0.4, 1)),
+        A.RandomResizedCrop(size=model_config.input_shape[1:], scale=(0.8, 1)),
         A.ToTensorV2()
     ]
 
@@ -54,21 +54,21 @@ def set_data(model_config: ModelConfig,
     train_ds = MnistDSWrapper(root=train_data_path, 
                               train=True, 
                               transforms=train_transforms, 
-                              output_shape=(48, 48),
+                              output_shape=model_config.input_shape[1:],
                               unconditional=True
                               )
     
     val_ds = MnistDSWrapper(root=val_data_path, 
                             train=False, 
                             transforms=val_transforms, 
-                            output_shape=(48, 48),
+                            output_shape=model_config.input_shape[1:],
                             unconditional=True
                             )
 
 
     # Create data loaders
-    train_loader = initialize_train_dataloader(train_ds, seed=42, batch_size=train_config.train_batch_size, num_workers=2, drop_last=True)
-    val_loader = initialize_val_dataloader(val_ds, seed=42, batch_size=train_config.val_batch_size, num_workers=2)
+    train_loader = initialize_train_dataloader(train_ds, seed=42, batch_size=train_config.train_batch_size, num_workers=3, drop_last=True)
+    val_loader = initialize_val_dataloader(val_ds, seed=42, batch_size=train_config.val_batch_size, num_workers=3)
 
     if return_datasets:
         return train_loader, val_loader, train_ds, val_ds
@@ -98,54 +98,55 @@ def prepare_log_directory() -> P:
 from diffusers import UNet2DModel
 
 # one that uses the diffusers implementation of the diffusion unet
-def set_model(config: ModelConfig) -> UNet2DModel:
+# def set_model(config: ModelConfig) -> UNet2DModel:
     
-    model = UNet2DModel(
-        sample_size=config.input_shape[1:],
-        in_channels=config.input_shape[0],
-        out_channels=config.input_shape[0],
-        block_out_channels=(128, 128),
-        down_block_types=("DownBlock2D", "DownBlock2D"), # let's see how this turns out without attention blocks
-        up_block_types=("UpBlock2D", "UpBlock2D"), # let's see how this turns out without attention blocks
-        time_embedding_dim=128,
-    )
+#     model = UNet2DModel(
+#         sample_size=config.input_shape[1:],
+#         in_channels=config.input_shape[0],
+#         out_channels=config.input_shape[0],
+#         block_out_channels=(128, 128),
+#         down_block_types=("DownBlock2D", "DownBlock2D"), # let's see how this turns out without attention blocks
+#         up_block_types=("UpBlock2D", "UpBlock2D"), # let's see how this turns out without attention blocks
+#         time_embedding_dim=128,
+#     )
 
-    # # let's use the default model for now.
-    # model = UNet2DModel(
-    #     sample_size=config.input_shape[1:],
-    #     in_channels=config.input_shape[0],
-    #     out_channels=config.input_shape[0],
+#     # # let's use the default model for now.
+#     # model = UNet2DModel(
+#     #     sample_size=config.input_shape[1:],
+#     #     in_channels=config.input_shape[0],
+#     #     out_channels=config.input_shape[0],
 
-        # layers_per_block=3,
-        # block_out_channels=(32, 64, 128),
-        # down_block_types=("DownBlock2D", "DownBlock2D", "DownBlock2D"),
-        # up_block_types=("UpBlock2D", "UpBlock2D", "UpBlock2D"),
-        # block_out_channels=(32, 64, 128),
-    # )
+#         # layers_per_block=3,
+#         # block_out_channels=(32, 64, 128),
+#         # down_block_types=("DownBlock2D", "DownBlock2D", "DownBlock2D"),
+#         # up_block_types=("UpBlock2D", "UpBlock2D", "UpBlock2D"),
+#         # block_out_channels=(32, 64, 128),
+#     # )
 
 
 
-    return model
+#     return model
 
 
 # a function using my own implementation of the diffusion unet
+from mypt.nets.conv_nets.diffusion_unet.wrapper.diffusion_unet1d import DiffusionUNetOneDim
 
-# def set_model(config: ModelConfig) -> DiffusionUNet:
+def set_model(config: ModelConfig) -> DiffusionUNetOneDim:
 
-#     model = DiffusionUNet(input_channels=config.input_shape[0],
-#                           output_channels=config.input_shape[0],
-#                           cond_dimension=256,                          
-#                           )
+    model = DiffusionUNetOneDim(input_channels=config.input_shape[0],
+                          output_channels=config.input_shape[0],
+                          cond_dimension=256,                          
+                          )
     
-#     # the default model reaches a training loss of 0.01 in less than 10 epochs
-#     # let's try to use a model with a similar capacity: it uses attention blocks which aren't currently implemented 
-#     # however, let's match the number of blocks + the number of channels. 
+    # the default model reaches a training loss of 0.01 in less than 10 epochs
+    # let's try to use a model with a similar capacity: it uses attention blocks which aren't currently implemented 
+    # however, let's match the number of blocks + the number of channels. 
 
-#     model.build_down_block(num_down_layers=4, num_res_blocks=3, out_channels=[256, 512, 1024, 1024], downsample_types="conv")
-#     model.build_middle_block(num_res_blocks=3)
-#     model.build_up_block(num_res_blocks=3, upsample_types="transpose_conv")
+    model.build_down_block(num_down_layers=4, num_resnet_blocks=3, out_channels=[256, 512, 1024, 1024], downsample_types="conv")
+    model.build_middle_block(num_resnet_blocks=3)
+    model.build_up_block(num_resnet_blocks=3, upsample_types="transpose_conv")
 
-#     return model
+    return model
 
 
 from diffusers.optimization import get_cosine_schedule_with_warmup
@@ -238,6 +239,6 @@ if __name__ == '__main__':
     # try to make it work with a checkpoint path
     # checkpoint_path = os.path.join(SCRIPT_DIR, 'runs', 'run_1')
     # # main(checkpoint_path)
-    # main()
-    checkpoint_path = os.path.join(SCRIPT_DIR, 'runs', 'run_2', 'model')
-    inference(checkpoint_path)
+    main()
+    # checkpoint_path = os.path.join(SCRIPT_DIR, 'runs', 'run_2', 'model')
+    # inference(checkpoint_path)

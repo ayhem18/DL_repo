@@ -14,7 +14,7 @@ from mnist import MnistDSWrapper
 def visualize_mnist_samples(
     root: str = "./data",
     num_samples: int = 5,
-    output_shape: Tuple[int, int] = (48, 48),
+    output_shape: Tuple[int, int] = (28, 28),
     batch_size: int = 1,
     apply_transforms: bool = True,
     save_path: Optional[str] = None
@@ -37,7 +37,8 @@ def visualize_mnist_samples(
     transforms = None
     if apply_transforms:
         transforms = [
-            A.RandomResizedCrop(size=(128, 128), scale=(0.4, 1))
+            A.RandomResizedCrop(size=output_shape, scale=(0.6, 1), p=1),
+            # A.CenterCrop(height=output_shape[0], width=output_shape[1])
 
             # A.RandomRotate90(p=0.5),
             # A.HorizontalFlip(p=0.5),
@@ -58,7 +59,7 @@ def visualize_mnist_samples(
     dataloader = DataLoader(
         dataset,
         batch_size=batch_size,
-        shuffle=False
+        shuffle=True 
     )
     
     # Get samples to visualize
@@ -113,8 +114,8 @@ if __name__ == "__main__":
         samples = visualize_mnist_samples(
             root=data_root,
             num_samples=3,
-            output_shape=(64, 64),
+            output_shape=(28, 28),
             apply_transforms=True,
-            save_path="mnist_visualization.png"
+            # save_path="mnist_visualization.png"
         )
     

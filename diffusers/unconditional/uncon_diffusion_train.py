@@ -14,10 +14,10 @@ from mypt.shortcuts import P
 from mypt.loggers import BaseLogger
 from mypt.visualization.general import visualize
 from mypt.code_utils import directories_and_files as dirf
-from mypt.nets.conv_nets.diffusion_unet.wrapper.diffusion_unet import DiffusionUNet
+from mypt.nets.conv_nets.diffusion_unet.wrapper.diffusion_unet1d import DiffusionUNetOneDim
 
 
-def train_epoch(model: Union[DiffusionUNet, UNet2DModel], 
+def train_epoch(model: Union[DiffusionUNetOneDim, UNet2DModel], 
                 noise_scheduler: DDPMScheduler,
                 train_loader: DataLoader, 
                 criterion: torch.nn.Module, 
@@ -127,7 +127,7 @@ def train_epoch(model: Union[DiffusionUNet, UNet2DModel],
     return avg_loss, batch_losses
 
 
-def val_epoch(model: DiffusionUNet, 
+def val_epoch(model: DiffusionUNetOneDim, 
                 noise_scheduler: DDPMScheduler,
                 val_loader: DataLoader, 
                 criterion: torch.nn.Module, 
@@ -217,7 +217,7 @@ def sample_with_diffusers(model: UNet2DModel,
     return torch.from_numpy(images.transpose(0, 3, 1, 2)) / 255.0
 
 
-def sample_manual(model: DiffusionUNet, 
+def sample_manual(model: DiffusionUNetOneDim, 
                     images: torch.Tensor,
                     noise_scheduler: DDPMScheduler,
                     device: torch.device,
@@ -247,7 +247,7 @@ def sample_manual(model: DiffusionUNet,
     return samples
 
 
-def sample_from_diffusion_model(model: Union[DiffusionUNet, UNet2DModel], 
+def sample_from_diffusion_model(model: Union[DiffusionUNetOneDim, UNet2DModel], 
                           noise_scheduler: DDPMScheduler,
                           device: torch.device,
                           images: torch.Tensor,
@@ -260,7 +260,7 @@ def sample_from_diffusion_model(model: Union[DiffusionUNet, UNet2DModel],
         return sample_manual(model, images, noise_scheduler, device, num_inference_steps), True
 
 
-def val_sample_diffusion_epoch(model: DiffusionUNet, 
+def val_sample_diffusion_epoch(model: DiffusionUNetOneDim, 
                         noise_scheduler: DDPMScheduler,
                         val_loader: DataLoader, 
                         device: torch.device,
@@ -320,7 +320,7 @@ def val_sample_diffusion_epoch(model: DiffusionUNet,
                 Image.fromarray(save_s).save(os.path.join(epoch_dir, f"sample_{batch_idx}_{i}.png"))
 
 
-def train_diffusion_model(model: DiffusionUNet, 
+def train_diffusion_model(model: DiffusionUNetOneDim, 
                noise_scheduler: DDPMScheduler,
                train_loader: DataLoader, 
                val_loader: DataLoader, 
