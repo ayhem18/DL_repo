@@ -1,5 +1,6 @@
 import os
 import torch
+import shutil
 
 import numpy as np
 
@@ -419,6 +420,17 @@ def train_diffusion_model(model: DiffusionUNetOneDim,
             best_val_loss = val_loss
             torch.save(model.state_dict(), os.path.join(log_dir, 'best_model.pth'))
             print(f"Model saved with validation loss: {val_loss:.4f}")
+
+            # if the model is a UNet2DModel, save the model in a way that can be loaded by the diffusers library
+            if isinstance(model, UNet2DModel):
+                pipeline = DDPMPipeline(unet=model, scheduler=noise_scheduler)
+                save_path = dirf.process_path(os.path.join(log_dir, 'best_model'), dir_ok=True, file_ok=False, must_exist=False)
+                # remove the directory if it exists
+                if os.path.exists(save_path):
+                    shutil.rmtree(save_path)
+
+                pipeline.save_pretrained(save_path) 
+                print(f"Model saved in diffusers format with validation loss: {val_loss:.4f}")
 
             
     return model
