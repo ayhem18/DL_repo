@@ -7,7 +7,9 @@ from tqdm import tqdm
 from PIL import Image
 from typing import Optional, Tuple, Union
 from torch.utils.data import DataLoader
-from diffusers import DDPMScheduler, UNet2DModel, DiffusionPipeline, DDPMPipeline
+from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
+from diffusers.models.unets.unet_2d import UNet2DModel
+from diffusers.pipelines.ddpm.pipeline_ddpm import DDPMPipeline
 
 
 from mypt.shortcuts import P
@@ -23,8 +25,9 @@ def train_epoch(model: Union[DiffusionUNetOneDim, UNet2DModel],
                 criterion: torch.nn.Module, 
                 optimizer: torch.optim.Optimizer, 
                 device: torch.device,
-                logger: BaseLogger = None,
-                epoch: int = None,
+                logger: Optional[BaseLogger] = None,
+                epoch: Optional[int] = None,
+                max_grad_norm: float = 1.0,
                 debug: bool = False):
     """
     Run one epoch of training.
@@ -60,8 +63,8 @@ def train_epoch(model: Union[DiffusionUNetOneDim, UNet2DModel],
 
         num_train_samples += images.shape[0]
 
-        # scale the image to the range [-1, 1]
-        images = images * 2.0 - 1.0
+        # normalize the images to the [-1, 1] range.
+        images = (images / 127.5) - 1.0
 
         if not torch.all(images >= -1.0) or not torch.all(images <= 1.0):
             raise ValueError("Images must be scaled to the [-1, 1] range. Otherwise, it might affect the training process.")
@@ -100,6 +103,11 @@ def train_epoch(model: Union[DiffusionUNetOneDim, UNet2DModel],
 
         # Backward pass and optimize
         loss.backward()
+        
+        # Clip gradients to prevent them from exploding, which is a common issue in training deep neural networks.
+        # This helps stabilize the training process. A max_norm of 1.0 is a common default.
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
+
         optimizer.step()
         
         # Get the loss value
@@ -155,7 +163,7 @@ def val_epoch(model: DiffusionUNetOneDim,
             noise = torch.randn(images.shape, device=device)
 
             # convert images to the [-1, 1] range
-            images = (images * 2) - 1
+            images = (images / 127.5) - 1.0
 
             # make sure the range is correct
             if torch.max(images) > 1 or torch.min(images) < -1:
@@ -214,7 +222,7 @@ def sample_with_diffusers(model: UNet2DModel,
     ).images
 
     # convert to tensor and return
-    return torch.from_numpy(images.transpose(0, 3, 1, 2)) / 255.0
+    return torch.from_numpy(images.transpose(0, 3, 1, 2)) * 255.0
 
 
 def sample_manual(model: DiffusionUNetOneDim, 
@@ -291,7 +299,14 @@ def val_sample_diffusion_epoch(model: DiffusionUNetOneDim,
 
             images = images.to(device)
             
-            diffusion_samples, scale_images = sample_from_diffusion_model(model, noise_scheduler, device, images[:10], num_samples=10, num_inference_steps=250)
+            images = (images / 127.5) - 1.0 
+
+            if not torch.all(images >= -1.0) or not torch.all(images <= 1.0):
+                raise ValueError("Images must be scaled to the [-1, 1] range.")
+
+            diffusion_samples, scale_images = sample_from_diffusion_model(model, noise_scheduler, device, images[:10], 
+                                                num_samples=10, 
+                                                num_inference_steps=250)
 
             epoch_dir = os.path.join(log_dir, 'samples', f"epoch_{epoch+1}")
             dirf.process_path(epoch_dir, dir_ok=True, file_ok=False, must_exist=False)
@@ -311,7 +326,7 @@ def val_sample_diffusion_epoch(model: DiffusionUNetOneDim,
                     visualize(vis_s, window_name=f"sampled_image_{batch_idx}_{i}")
 
                 # convert to numpy for saving
-                if vis_s.shape[0] > 3: # (C, H, W) with C > 3
+                if vis_s.shape[0] >= 3: # (C, H, W) with C > 3
                     save_s = vis_s.cpu().permute(1, 2, 0)
                 else: # (C, H, W) with C <= 3
                     save_s = vis_s.cpu().squeeze(0)
@@ -332,6 +347,7 @@ def train_diffusion_model(model: DiffusionUNetOneDim,
                logger: BaseLogger,
                log_dir: P,
                val_per_epoch: int = 5,
+               max_grad_norm: float = 1.0,
                debug: bool = False):
     """
     Train the model and validate it periodically.
@@ -366,6 +382,7 @@ def train_diffusion_model(model: DiffusionUNetOneDim,
             device=device,
             logger=logger,
             epoch=epoch,
+            max_grad_norm=max_grad_norm,
             debug=debug,
         )
         

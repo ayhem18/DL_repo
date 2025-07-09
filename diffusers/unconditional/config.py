@@ -40,7 +40,7 @@ class Config:
 # a configuration for the model arguments
 @dataclass
 class ModelConfig(Config):
-    input_shape: Tuple[int, int, int] = (1, 28, 28)
+    input_shape: Tuple[int, int, int] = (3, 128, 128)
 
 
 @dataclass
