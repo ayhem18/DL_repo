@@ -8,9 +8,8 @@ import albumentations as A
 
 from pathlib import Path
 from typing import Tuple, Union
-from diffusers import DDPMScheduler, DDPMPipeline
-
 from torch.utils.data import DataLoader, Dataset
+from diffusers import DDPMScheduler, DDPMPipeline
 
 
 from mypt.shortcuts import P
@@ -251,9 +250,11 @@ def main():
 
     # why ? no good reason, just copied from 
     # https://colab.research.google.com/github/huggingface/notebooks/blob/main/diffusers/training_example.ipynb#scrollTo=my90vVcmxU5V
+
+
     lr_scheduler = get_cosine_schedule_with_warmup(
         optimizer=optimizer,
-        num_warmup_steps=len(train_loader) * 2, # 2 epochs to warm up
+        num_warmup_steps=train_config.num_warmup_steps,
         num_training_steps=(len(train_loader) * train_config.num_epochs),
     )
 

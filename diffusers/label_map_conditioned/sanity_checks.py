@@ -33,7 +33,7 @@ def visualize_wrapper():
     for i in range(len(train_ds)):
         visualize(train_ds[i])
 
-``
+
 def visualize_dataset():
     """
     consecutive samples are not fo the same class... not ideal..

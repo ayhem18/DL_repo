@@ -29,7 +29,9 @@ def train_epoch(model: Union[DiffusionUNetOneDim, UNet2DModel],
                 logger: Optional[BaseLogger] = None,
                 epoch: Optional[int] = None,
                 max_grad_norm: float = 1.0,
-                debug: bool = False):
+                debug: bool = False,
+                lr_scheduler: Optional[torch.optim.lr_scheduler.LRScheduler] = None, 
+                epoch_lr: Optional[float] = None):
     """
     Run one epoch of training.
     
@@ -45,6 +47,11 @@ def train_epoch(model: Union[DiffusionUNetOneDim, UNet2DModel],
     Returns:
         Average training loss for the epoch and list of batch losses
     """
+
+    # at least one of "epoch_lr" or "lr_scheduler" should be provided
+    if epoch_lr is not None and lr_scheduler is not None:
+        raise ValueError("either 'epoch_lr' or 'lr_scheduler' should be provided, not both")
+
     model = model.to(device)
     model.train()
     train_loss = 0.0
@@ -111,6 +118,9 @@ def train_epoch(model: Union[DiffusionUNetOneDim, UNet2DModel],
 
         optimizer.step()
         
+        if lr_scheduler is not None:
+            lr_scheduler.step()
+
         # Get the loss value
         batch_loss = loss.item()
         batch_losses[batch_idx] = batch_loss
@@ -123,7 +133,11 @@ def train_epoch(model: Union[DiffusionUNetOneDim, UNet2DModel],
         if logger is not None and epoch is not None:
             global_step = epoch * len(train_loader) + batch_idx
             logger.log_scalar('Loss/train_batch', batch_loss, global_step)
-    
+
+        # log the loss and the learning rate to the tqdm progress bar
+        # prioritize the lr_scheduler if it is provided
+        epoch_lr = lr_scheduler.get_last_lr()[0] if lr_scheduler is not None else epoch_lr
+        train_loop.set_postfix(**{'batch_loss': batch_loss, 'lr': epoch_lr})
 
     if debug:
         for i, (s, t, l) in enumerate(zip(debug_samples[:10], debug_samples_timesteps[:10], loss_on_debug_samples[:10])):
@@ -371,8 +385,15 @@ def train_diffusion_model(model: DiffusionUNetOneDim,
     all_train_losses = []
     all_val_losses = []
     
-    for epoch in tqdm(range(num_epochs), desc="Training loop"):
-        
+    train_loop = tqdm(range(num_epochs), desc="Training loop")
+
+
+    for epoch in train_loop:
+        # get the learning rate of the current epoch:
+        # use the optimizer to get the learning rate
+        # or use the lr_scheduler to get the learning rate
+        epoch_lr = optimizer.param_groups[0]['lr'] 
+
         # Training phase
         train_loss, batch_losses = train_epoch(
             model=model,
@@ -385,9 +406,11 @@ def train_diffusion_model(model: DiffusionUNetOneDim,
             epoch=epoch,
             max_grad_norm=max_grad_norm,
             debug=debug,
+            lr_scheduler=lr_scheduler,
         )
         
-        lr_scheduler.step()
+        # log the loss and the learning rate to the tqdm progress bar
+        train_loop.set_postfix(**{'epoch_loss': train_loss, 'lr': epoch_lr})
         
         logger.log_scalar('Loss/train_epoch', train_loss, epoch)
         all_train_losses.append(train_loss)

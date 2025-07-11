@@ -1,7 +1,8 @@
 import json
 
-from typing import Tuple
+from typing import List, Tuple
 from dataclasses import asdict, dataclass
+from albumentations import BasicTransform
 
 from mypt.shortcuts import P
 
@@ -40,27 +41,33 @@ class Config:
 # a configuration for the model arguments
 @dataclass
 class ModelConfig(Config):
-    input_shape: Tuple[int, int, int] = (3, 128, 128)
+    input_shape: Tuple[int, int, int] = (1, 128, 128)
+    # output_shape: Tuple[int, int, int] = (3, 128, 128)
 
 
 @dataclass
 class OptimizerConfig(Config):
-
-    # lr scheduler: every epoch
-    # lr: 1e-3 works for batch sizes of 8 to 16, training diverges for batch sizes of 32 and above 
-    
-    # lr scheduler: every step
-    # let's see how it goes
-
     learning_rate: float = 1e-4
-    num_warmup_steps: int = 250
-    # weight_decay: float = 0.0
-    # lr_warmup_steps: int = 100
+    weight_decay: float = 0.0
+
+
+# a configuration for the dataset
+# @dataclass
+# class DatasetConfig(Config):
+#     train_dir: str = 'data/train'
+#     val_dir: str = 'data/val'
+#     train_masks_dir: str = 'data/train_masks'
+#     val_masks_dir: str = 'data/val_masks'
+
+#     # train_augmentations: List[BasicTransform]
+#     # val_augmentations: List[BasicTransform]
+
+
 
 @dataclass
 class TrainingConfig(Config):
-    train_batch_size: int = 64
-    val_batch_size: int = 64
-    num_epochs: int = 25
+    train_batch_size: int = 200 # set to 4 locally, and 128 on the server
+    val_batch_size: int = 64 # set to 8 locally, and 64 on the server
+    num_epochs: int = 5    
     seed: int = 42
 

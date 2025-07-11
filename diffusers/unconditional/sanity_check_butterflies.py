@@ -72,6 +72,9 @@ def visualize_noisy_butterflies(num_samples=5, timesteps=[25, 100, 200, 400, 800
     pu.seed_everything(42)
     
     # Load a small subset of the dataset
+    # this code is an extension of the following notebook:
+    # https://colab.research.google.com/github/huggingface/notebooks/blob/main/diffusers/training_example.ipynb#scrollTo=67640279-979b-490d-80fe-65673b94ae00 
+    
     dataset_name = "huggan/smithsonian_butterflies_subset"
     butterfly_ds = load_dataset(dataset_name, split="train[:5%]")
     
