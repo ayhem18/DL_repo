@@ -40,8 +40,8 @@ class Config:
 # a configuration for the model arguments
 @dataclass
 class ModelConfig(Config):
-    input_shape: Tuple[int, int, int] = (3, 128, 128)
-
+    input_shape: Tuple[int, int, int] = (1, 32, 32)
+    model_type: str = "custom_model"
 
 @dataclass
 class OptimizerConfig(Config):
@@ -59,8 +59,10 @@ class OptimizerConfig(Config):
 
 @dataclass
 class TrainingConfig(Config):
-    train_batch_size: int = 64
-    val_batch_size: int = 64
-    num_epochs: int = 25
+    dataset: str = "butterflies"
+    train_batch_size: int = 4
+    val_batch_size: int = 16
+    num_epochs: int = 50
     seed: int = 42
+
 

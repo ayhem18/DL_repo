@@ -97,8 +97,8 @@ def train_epoch(model: Union[DiffusionUNetOneDim, UNet2DModel],
 
         outputs = model.forward(noisy_images, timesteps)
 
-        if isinstance(model, UNet2DModel):
-            # for whatever reason, the outputs are a wrapper around a tensor.
+
+        if hasattr(outputs, 'sample'):
             outputs = outputs.sample
 
         loss = criterion(outputs, noise)
@@ -229,7 +229,7 @@ def sample_with_diffusers(model: UNet2DModel,
     pipeline = DDPMPipeline(unet=model, scheduler=noise_scheduler)
     pipeline.to(device)
 
-    images: np.ndarray = pipeline(
+    images = pipeline(
         batch_size=num_samples,
         generator=torch.Generator(device='cpu').manual_seed(42),
         output_type="tensor", # if output_type is "pil", it will return a list of PIL images, any other value it will return a numpy array
@@ -350,7 +350,7 @@ def val_sample_diffusion_epoch(model: DiffusionUNetOneDim,
                 Image.fromarray(save_s).save(os.path.join(epoch_dir, f"sample_{batch_idx}_{i}.png"))
 
 
-def train_diffusion_model(model: DiffusionUNetOneDim, 
+def train_diffusion_model(model: Union[DiffusionUNetOneDim, UNet2DModel], 
                noise_scheduler: DDPMScheduler,
                train_loader: DataLoader, 
                val_loader: DataLoader, 
@@ -363,7 +363,7 @@ def train_diffusion_model(model: DiffusionUNetOneDim,
                log_dir: P,
                val_per_epoch: int = 5,
                max_grad_norm: float = 1.0,
-               debug: bool = False):
+               debug: bool = False) -> Union[DiffusionUNetOneDim, UNet2DModel]:
     """
     Train the model and validate it periodically.
     
@@ -389,10 +389,6 @@ def train_diffusion_model(model: DiffusionUNetOneDim,
 
 
     for epoch in train_loop:
-        # get the learning rate of the current epoch:
-        # use the optimizer to get the learning rate
-        # or use the lr_scheduler to get the learning rate
-        epoch_lr = optimizer.param_groups[0]['lr'] 
 
         # Training phase
         train_loss, batch_losses = train_epoch(
@@ -408,7 +404,12 @@ def train_diffusion_model(model: DiffusionUNetOneDim,
             debug=debug,
             lr_scheduler=lr_scheduler,
         )
-        
+
+        # get the learning rate of the current epoch:
+        # use the optimizer to get the learning rate
+
+        epoch_lr = optimizer.param_groups[0]['lr'] 
+
         # log the loss and the learning rate to the tqdm progress bar
         train_loop.set_postfix(**{'epoch_loss': train_loss, 'lr': epoch_lr})
         

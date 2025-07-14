@@ -4,8 +4,8 @@ import torch
 import numpy as np
 import albumentations as A
 
+from torchvision import datasets
 from torch.utils.data import Dataset
-from torchvision import datasets, transforms as tr
 from typing import List, Tuple, Union, Optional
 
 
@@ -27,8 +27,9 @@ class MnistDSWrapper(Dataset):
     def __init__(self, 
                  root: str, 
                  train: bool = True,
-                 transforms: Optional[Union[List[A.BasicTransform], A.Compose]] = None,
-                 output_shape: Tuple[int, int] = (64, 64)):
+                 transforms: Optional[Union[List, A.Compose, A.BasicTransform]] = None,
+                 output_shape: Tuple[int, int] = (64, 64),
+                 unconditional: bool = False):
         
         # Default transform if none is provided
         self.to_tensor = A.pytorch.ToTensorV2()
@@ -43,7 +44,8 @@ class MnistDSWrapper(Dataset):
         
         # Store parameters
         self.transforms = transforms
-        self.output_shape = output_shape
+        self.output_shape = output_shape    
+        self.unconditional = unconditional  
         
         # Convert transforms list to Compose if needed
         if isinstance(self.transforms, List):
@@ -100,7 +102,7 @@ class MnistDSWrapper(Dataset):
             
         return padded
 
-    def __getitem__(self, idx) -> Tuple[torch.Tensor, int, torch.Tensor]:
+    def __getitem__(self, idx) -> Union[torch.Tensor, Tuple[torch.Tensor, int, torch.Tensor]]:
         """
         Get an item from the dataset.
         
@@ -115,7 +117,7 @@ class MnistDSWrapper(Dataset):
         
         # Convert PIL Image to numpy array
         image_np = np.array(image) / 255.0
-        
+                
         # Pad image to output shape
         padded_image = self._pad_to_output_shape(image_np)
         
@@ -127,6 +129,11 @@ class MnistDSWrapper(Dataset):
         transformed_image = transformed["image"]
         transformed_mask = transformed["mask"]
         
+
+        if self.unconditional:
+            return transformed_image
+
+
         if torch.is_tensor(transformed_mask):                            
             if transformed_mask.ndim == 3:
                 # remove the first dimension if it exists
