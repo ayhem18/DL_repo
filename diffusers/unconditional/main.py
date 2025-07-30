@@ -78,7 +78,7 @@ def main():
     if isinstance (trained_model, UNet2DModel):
         pipeline = DDPMPipeline(unet=trained_model, scheduler=noise_scheduler)
         pipeline.save_pretrained(os.path.join(exp_log_dir, 'model')) 
-        return 
+
 
     # save custom model 
     # Save the config
@@ -101,11 +101,5 @@ def inference(folder_path: P, num_samples: int = 20, num_inference_steps: int = 
     
     return images
 
-
 if __name__ == '__main__':
-    # try to make it work with a checkpoint path
-    # checkpoint_path = os.path.join(SCRIPT_DIR, 'runs', 'run_1')
-    # # main(checkpoint_path)
     main()
-    # checkpoint_path = os.path.join(SCRIPT_DIR, 'runs', 'run_2', 'model')
-    # inference(checkpoint_path)

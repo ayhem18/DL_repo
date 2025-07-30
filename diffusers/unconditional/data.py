@@ -38,7 +38,9 @@ class HuggingFaceDatasetWrapper(Dataset):
     def __getitem__(self, idx):
         image = self.dataset[idx]["image"].convert("RGB")
         transformed = self.transforms(image=np.asarray(image))
-        return transformed["image"]
+        res = transformed["image"]
+
+        return res
 
 
 def set_butterfiles_dataset(model_config: ModelConfig, train_config: TrainingConfig) -> Tuple[DataLoader, DataLoader]:
