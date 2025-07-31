@@ -1,25 +1,18 @@
-import os
 import torch
-import shutil
-
-import numpy as np
 
 from tqdm import tqdm
-from PIL import Image
 from torch.utils.data import DataLoader
 from typing import Dict, List, Optional, Tuple, Union
 from diffusers.models.unets.unet_2d import UNet2DModel
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
-from diffusers.pipelines.ddpm.pipeline_ddpm import DDPMPipeline
 
 
 from mypt.shortcuts import P
 from mypt.loggers import BaseLogger
 from mypt.visualization.general import visualize
-from mypt.code_utils import directories_and_files as dirf
 from mypt.nets.conv_nets.diffusion_unet.wrapper.diffusion_unet1d import DiffusionUNetOneDim
 
-from sample import sample_diffusion_epoch       
+from training.sample import sample_diffusion_epoch       
 
 
 def _normalize_images(images: torch.Tensor) -> torch.Tensor:
@@ -44,12 +37,13 @@ def train_epoch(model: Union[DiffusionUNetOneDim, UNet2DModel],
                 criterion: torch.nn.Module, 
                 optimizer: torch.optim.Optimizer, 
                 device: torch.device,
+                timestep_bins: List[int],
                 logger: Optional[BaseLogger] = None,
                 epoch: Optional[int] = None,
                 max_grad_norm: float = 1.0,
                 debug: bool = False,
                 lr_scheduler: Optional[torch.optim.lr_scheduler.LRScheduler] = None, 
-                epoch_lr: Optional[float] = None):
+                epoch_lr: Optional[float] = None) -> Tuple[float, List[float], Dict[str, float]]:
     """
     Run one epoch of training.
     
@@ -66,6 +60,11 @@ def train_epoch(model: Union[DiffusionUNetOneDim, UNet2DModel],
         Average training loss for the epoch and list of batch losses
     """
 
+    if not hasattr(criterion, 'reduction'):
+        raise ValueError("criterion must have a 'reduction' attribute")
+    
+    criterion.reduction = 'none'
+
     # at least one of "epoch_lr" or "lr_scheduler" should be provided
     if epoch_lr is not None and lr_scheduler is not None:
         raise ValueError("either 'epoch_lr' or 'lr_scheduler' should be provided, not both")
@@ -76,6 +75,15 @@ def train_epoch(model: Union[DiffusionUNetOneDim, UNet2DModel],
     num_train_samples = 0
     batch_losses = [None for _ in range(len(train_loader))]
     
+    bin_boundaries = torch.tensor([0] + timestep_bins, device='cpu')
+    bin_labels = [f'{bin_boundaries[i]}-{bin_boundaries[i+1]-1}' for i in range(len(bin_boundaries)-1)]
+    max_ts = noise_scheduler.config.num_train_timesteps
+    if max_ts > bin_boundaries[-1]:
+         bin_labels.append(f'{bin_boundaries[-1]}-{max_ts-1}')
+
+    train_loss_per_bin = {label: 0.0 for label in bin_labels}
+    train_count_per_bin = {label: 0 for label in bin_labels}
+
     train_loop = tqdm(train_loader, desc=f"Training epoch {epoch or ''}")
 
 
@@ -118,7 +126,8 @@ def train_epoch(model: Union[DiffusionUNetOneDim, UNet2DModel],
         if hasattr(outputs, 'sample'):
             outputs = outputs.sample
 
-        loss = criterion(outputs, noise)
+        per_sample_loss = criterion(outputs, noise).mean(dim=tuple(range(1, len(outputs.shape))))
+        loss = per_sample_loss.mean()
 
         if debug:
             debug_ni = noisy_images[0].detach().cpu()
@@ -142,6 +151,15 @@ def train_epoch(model: Union[DiffusionUNetOneDim, UNet2DModel],
         batch_loss = loss.item()
         batch_losses[batch_idx] = batch_loss
         
+        bin_indices = torch.bucketize(timesteps.cpu(), bin_boundaries, right=False)
+    
+        for i, b_idx in enumerate(bin_indices):
+            label_idx = b_idx.item()
+            if label_idx < len(bin_labels):
+                label = bin_labels[label_idx]
+                train_loss_per_bin[label] += per_sample_loss[i].item()
+                train_count_per_bin[label] += 1
+
         # Update statistics
         train_loss += images.shape[0] * batch_loss # multiply by the number of samples in the batch (since batch_loss is the averaged loss per sample... the averaging for the training loss is done at the end)
         train_loop.set_postfix(loss=batch_loss)
@@ -164,7 +182,11 @@ def train_epoch(model: Union[DiffusionUNetOneDim, UNet2DModel],
 
 
     avg_loss = round(train_loss / num_train_samples, 8)
-    return avg_loss, batch_losses
+
+    # keep only the bins that have at least one sample
+    avg_train_loss_per_bin = dict([(label, train_loss_per_bin[label] / train_count_per_bin[label]) for label in bin_labels if train_count_per_bin[label]])
+
+    return avg_loss, batch_losses, avg_train_loss_per_bin
 
 
 def val_epoch(model: Union[DiffusionUNetOneDim, UNet2DModel], 
@@ -179,8 +201,7 @@ def val_epoch(model: Union[DiffusionUNetOneDim, UNet2DModel],
     if not hasattr(criterion, 'reduction'):
         raise ValueError("criterion must have a 'reduction' attribute")
 
-    val_criterion = criterion.clone()
-    val_criterion.reduction = 'none'
+    criterion.reduction = 'none'
   
     model = model.to(device)
     model.eval()
@@ -227,12 +248,16 @@ def val_epoch(model: Union[DiffusionUNetOneDim, UNet2DModel],
                 # for whatever reason, the outputs of UNet2DModel are a wrapper around a tensor.
                 outputs = outputs.sample
 
-            loss = val_criterion(outputs, noise)
+            loss = criterion(outputs, noise)
 
             # compute the mean across all dimensions expect the batch dimension
             loss = loss.mean(dim=tuple(range(1, len(loss.shape)))) 
             # at this point the loss must be a tensor of shape (bs * n_ts,)
             # The layout is [loss_img1_ts1, ..., loss_imgN_ts1, loss_img1_ts2, ..., loss_imgN_ts2, ...]
+
+            if loss.shape != (batch_size * n_ts,):
+                # sanity check !!
+                raise ValueError(f"the loss must be a tensor of shape (bs * n_ts,), but it is {loss.shape}")
 
             # Reshape to (n_ts, batch_size) to group losses by timestep
             loss_per_ts_view = loss.view(n_ts, batch_size)
@@ -246,14 +271,13 @@ def val_epoch(model: Union[DiffusionUNetOneDim, UNet2DModel],
             val_loop.set_postfix(loss=loss_value)
 
             # Update statistics
-            epoch_val_loss += loss.sum().item() # multiply by the number of samples in the batch (since batch_loss is the averaged loss per sample... the averaging for the epoch-level loss is done at the end)
+            epoch_val_loss += loss.sum().item() 
             
             if logger is not None and epoch is not None:
                 global_step = epoch * len(val_loader) + batch_idx
                 logger.log_scalar('Loss/val_batch', loss_value, global_step)
 
-        total_processed = val_num_samples * n_ts
-        avg_loss = round(epoch_val_loss / total_processed, 8)
+        avg_loss = round(epoch_val_loss / (val_num_samples * n_ts), 8)
 
         avg_loss_per_ts = {ts: round(total_loss / val_num_samples, 8) for ts, total_loss in epoch_val_loss_per_ts.items()}
 
@@ -271,10 +295,11 @@ def train_diffusion_model(model: Union[DiffusionUNetOneDim, UNet2DModel],
                device: torch.device, 
                logger: BaseLogger,
                log_dir: P,
+               timestep_bins: List[int],
+               validation_timesteps: Optional[list],
                val_per_epoch: int = 5,
                max_grad_norm: float = 1.0,
-               debug: bool = False,
-               validation_timesteps: Optional[list] = None) -> Union[DiffusionUNetOneDim, UNet2DModel]:
+               debug: bool = False) -> Union[DiffusionUNetOneDim, UNet2DModel]:
     """
     Train the model and validate it periodically.
     
@@ -302,13 +327,14 @@ def train_diffusion_model(model: Union[DiffusionUNetOneDim, UNet2DModel],
     for epoch in train_loop:
 
         # Training phase
-        train_loss, batch_losses = train_epoch(
+        train_loss, batch_losses, train_loss_per_bin = train_epoch(
             model=model,
             noise_scheduler=noise_scheduler,
             train_loader=train_loader,
             criterion=criterion,
             optimizer=optimizer,
             device=device,
+            timestep_bins=timestep_bins,
             logger=logger,
             epoch=epoch,
             max_grad_norm=max_grad_norm,
@@ -325,6 +351,10 @@ def train_diffusion_model(model: Union[DiffusionUNetOneDim, UNet2DModel],
         train_loop.set_postfix(**{'epoch_loss': train_loss, 'lr': epoch_lr})
         
         logger.log_scalar('Loss/train_epoch', train_loss, epoch)
+
+        for bin_label, loss in train_loss_per_bin.items():
+            logger.log_scalar(f'Loss/train_epoch_bin_{bin_label}', loss, epoch)
+
         all_train_losses.append(train_loss)
 
         # Validation phase
@@ -345,12 +375,9 @@ def train_diffusion_model(model: Union[DiffusionUNetOneDim, UNet2DModel],
             logger=logger,
             epoch=epoch
         )
+        print(f"Epoch {epoch+1}/{num_epochs}, Train Loss: {train_loss:.8f}, Val Loss: {val_loss:.8f}")
 
         all_val_losses.append(val_loss)
-
-
-
-        print(f"Epoch {epoch+1}/{num_epochs}, Train Loss: {train_loss:.8f}, Val Loss: {val_loss:.8f}")
 
         # Log epoch losses
         logger.log_scalar('Loss/val_epoch', val_loss, epoch)
@@ -360,24 +387,9 @@ def train_diffusion_model(model: Union[DiffusionUNetOneDim, UNet2DModel],
 
 
         if (epoch + 1) % val_per_epoch == 0:
-            sample_diffusion_epoch(model, noise_scheduler, val_loader, device, logger, log_dir, epoch, debug)
+            sample_diffusion_epoch(model, noise_scheduler, val_loader, device, log_dir, epoch, debug)
 
-        # Save the model if validation loss improves
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            torch.save(model.state_dict(), os.path.join(log_dir, 'best_model.pth'))
-            print(f"Model saved with validation loss: {val_loss:.8f}")
-
-            # if the model is a UNet2DModel, save the model in a way that can be loaded by the diffusers library
-            if isinstance(model, UNet2DModel):
-                pipeline = DDPMPipeline(unet=model, scheduler=noise_scheduler)
-                save_path = dirf.process_path(os.path.join(log_dir, 'best_model'), dir_ok=True, file_ok=False, must_exist=False)
-                # remove the directory if it exists
-                if os.path.exists(save_path):
-                    shutil.rmtree(save_path)
-
-                pipeline.save_pretrained(save_path) 
-                print(f"Model saved in diffusers format with validation loss: {val_loss:.8f}")
+        # TODO: add FID evaluation, general checkpointing code 
 
             
     return model

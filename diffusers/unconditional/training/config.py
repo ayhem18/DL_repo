@@ -1,6 +1,6 @@
 import json
 
-from typing import Tuple
+from typing import List, Tuple
 from dataclasses import asdict, dataclass
 
 from mypt.shortcuts import P
@@ -64,5 +64,8 @@ class TrainingConfig(Config):
     val_batch_size: int = 16
     num_epochs: int = 50
     seed: int = 42
+
+    timestep_bins = [50, 500, 1000] # the bins should end with the total number of timesteps
+    validation_timesteps = [10, 50, 250, 500, 999] # the validation timesteps must be < the total number of timesteps
 
 

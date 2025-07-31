@@ -15,7 +15,7 @@ from mypt.data.dataloaders.standard_dataloaders import initialize_train_dataload
 
 
 from mnist_dataset.mnist import MnistDSWrapper
-from config import ModelConfig, TrainingConfig
+from training.config import ModelConfig, TrainingConfig
 
 
 

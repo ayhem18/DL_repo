@@ -1,11 +1,9 @@
-
-
 from typing import Union
 from diffusers.models.unets.unet_2d import UNet2DModel
 
-from mypt.nets.conv_nets.diffusion_unet.wrapper.diffusion_unet1d import DiffusionUNetOneDim
 
-from config import ModelConfig
+from mypt.nets.conv_nets.diffusion_unet.wrapper.diffusion_unet1d import DiffusionUNetOneDim
+from training.config import ModelConfig
 
 
 def set_my_custom_model(config: ModelConfig) -> DiffusionUNetOneDim:

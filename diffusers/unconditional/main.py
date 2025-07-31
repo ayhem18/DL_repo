@@ -8,14 +8,13 @@ from diffusers.optimization import get_cosine_schedule_with_warmup
 
 from mypt.shortcuts import P
 from mypt.loggers import get_logger
+from mypt.visualization.general import visualize
 
 
-from uncon_diffusion_train import train_diffusion_model
-from config import ModelConfig, OptimizerConfig, TrainingConfig
-
-
-from model import set_model
-from data import set_data, prepare_log_directory
+from training.model import set_model
+from training.train import train_diffusion_model
+from training.data import set_data, prepare_log_directory
+from training.config import ModelConfig, OptimizerConfig, TrainingConfig
 
 
 def main():
@@ -67,6 +66,8 @@ def main():
         optimizer=optimizer,
         lr_scheduler=lr_scheduler,
         num_epochs=train_config.num_epochs,
+        timestep_bins=train_config.timestep_bins,
+        validation_timesteps=train_config.validation_timesteps,
         device=device, 
         logger=logger,
         log_dir=exp_log_dir,
@@ -87,7 +88,6 @@ def main():
     print("Training completed!")
 
 
-from mypt.visualization.general import visualize
 
 
 def inference(folder_path: P, num_samples: int = 20, num_inference_steps: int = 250):
