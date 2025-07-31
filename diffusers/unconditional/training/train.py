@@ -6,10 +6,10 @@ import numpy as np
 
 from tqdm import tqdm
 from PIL import Image
-from typing import Optional, Tuple, Union
 from torch.utils.data import DataLoader
-from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
+from typing import Dict, List, Optional, Tuple, Union
 from diffusers.models.unets.unet_2d import UNet2DModel
+from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 from diffusers.pipelines.ddpm.pipeline_ddpm import DDPMPipeline
 
 
@@ -18,6 +18,24 @@ from mypt.loggers import BaseLogger
 from mypt.visualization.general import visualize
 from mypt.code_utils import directories_and_files as dirf
 from mypt.nets.conv_nets.diffusion_unet.wrapper.diffusion_unet1d import DiffusionUNetOneDim
+
+from sample import sample_diffusion_epoch       
+
+
+def _normalize_images(images: torch.Tensor) -> torch.Tensor:
+    """
+    Normalizing images is so important !!! (I am not sure if having [0, 1] is significantly different from [-1, 1] (probably depends on the scheduler I am using))
+    """
+    # make sure the images are either in the [0, 1] or [0, 255] ranges
+    if (not (images.min() >= 0 and images.max() <= 1)) and (not (images.min() >= 0 and images.max() <= 255)):
+        raise ValueError("Images must be in the [0, 1] or [0, 255] range")  
+
+    # at this point, the images are either in the [0, 1] or [0, 255] ranges     
+    if images.max() > 1:
+        images = images / 255.0
+
+    # convert to the [-1, 1] range
+    return (images * 2.0) - 1.0
 
 
 def train_epoch(model: Union[DiffusionUNetOneDim, UNet2DModel], 
@@ -67,16 +85,15 @@ def train_epoch(model: Union[DiffusionUNetOneDim, UNet2DModel],
 
     for batch_idx, images in enumerate(train_loop):
         # move all data to the device
+        # normalize the images to the [-1, 1] range.
+        # think of a more efficient way to do this
+        images = _normalize_images(images)
+        # move to device
         images = images.to(device)        
 
         num_train_samples += images.shape[0]
 
-        # normalize the images to the [-1, 1] range.
-        images = (images / 127.5) - 1.0
 
-        if not torch.all(images >= -1.0) or not torch.all(images <= 1.0):
-            raise ValueError("Images must be scaled to the [-1, 1] range. Otherwise, it might affect the training process.")
-        
         # Zero the parameter gradients
         optimizer.zero_grad()
         
@@ -109,11 +126,11 @@ def train_epoch(model: Union[DiffusionUNetOneDim, UNet2DModel],
             debug_samples_timesteps.append(timesteps[0].detach().cpu())
             loss_on_debug_samples.append(loss.item())
 
-        # Backward pass and optimize
+        # compute the gradients
         loss.backward()
-        
-        # Clip gradients to prevent them from exploding, which is a common issue in training deep neural networks.
-        # This helps stabilize the training process. A max_norm of 1.0 is a common default.
+
+        # clip the gradients to prevent them from exploding, which is a common issue in training deep neural networks.
+        # this helps stabilize the training process. A max_norm of 1.0 is a common default.
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_grad_norm)
 
         optimizer.step()
@@ -146,23 +163,31 @@ def train_epoch(model: Union[DiffusionUNetOneDim, UNet2DModel],
             visualize(s, window_name=f"Debug Sample {i} - timestep: {t.item()} - loss: {l:.4f}")
 
 
-    avg_loss = round(train_loss / num_train_samples, 4)
+    avg_loss = round(train_loss / num_train_samples, 8)
     return avg_loss, batch_losses
 
 
-def val_epoch(model: DiffusionUNetOneDim, 
-                noise_scheduler: DDPMScheduler,
-                val_loader: DataLoader, 
-                criterion: torch.nn.Module, 
-                device: torch.device,
-                logger: Optional[BaseLogger] = None,
-                epoch: Optional[int] = None):
+def val_epoch(model: Union[DiffusionUNetOneDim, UNet2DModel], 
+            noise_scheduler: DDPMScheduler,
+            val_loader: DataLoader, 
+            criterion: torch.nn.Module, 
+            validation_timesteps: List[int],
+            device: torch.device,
+            logger: Optional[BaseLogger] = None,
+            epoch: Optional[int] = None) -> Tuple[float, List[float], Dict[int, float]]:
     
+    if not hasattr(criterion, 'reduction'):
+        raise ValueError("criterion must have a 'reduction' attribute")
+
+    val_criterion = criterion.clone()
+    val_criterion.reduction = 'none'
+  
     model = model.to(device)
     model.eval()
 
     epoch_val_loss = 0.0
     val_num_samples = 0
+    epoch_val_loss_per_ts = {ts: 0.0 for ts in validation_timesteps}
 
     val_loop = tqdm(val_loader, desc="Validation")
 
@@ -171,189 +196,74 @@ def val_epoch(model: DiffusionUNetOneDim,
     with torch.no_grad():
 
         for batch_idx, images in enumerate(val_loop):
+            #normalize the images to the [-1, 1] range
+            images = _normalize_images(images)
             images = images.to(device)
 
             val_num_samples += images.shape[0]
+            batch_size = images.shape[0]
             
-            noise = torch.randn(images.shape, device=device)
+            if not validation_timesteps or len(validation_timesteps) == 0:
+                raise ValueError("validation_timesteps must be provided for validation")
 
-            # convert images to the [-1, 1] range
-            images = (images / 127.5) - 1.0
+            n_ts = len(validation_timesteps)
+            
+            # Expand images: [img1, ..., img_N] -> [img1, ..., img_N, img1, ..., img_N, ...]
+            # This repeats the whole batch of images for each timestep.
+            images_expanded = images.repeat(n_ts, 1, 1, 1)
 
-            # make sure the range is correct
-            if torch.max(images) > 1 or torch.min(images) < -1:
-                raise ValueError("the images must be in the [-1, 1]. Otherwise, it might affect the training process.")
+            # Create timesteps: [ts1, ts2] -> [ts1, ... ts1 (N times), ts2, ... ts2 (N times)]
+            # Each timestep is repeated N=batch_size times.
+            ts_tensor = torch.tensor(validation_timesteps, device=device, dtype=torch.int64)
+            timesteps = ts_tensor.repeat_interleave(batch_size)
 
-            timesteps = torch.randint(
-                0, noise_scheduler.config.num_train_timesteps, # between 0 and the num_train_timesteps 
-                (images.shape[0],), device=device,
-                dtype=torch.int64
-            )   
-
-            noisy_images = noise_scheduler.add_noise(images, noise, timesteps).to(torch.float32)
-
+            noise = torch.randn(images_expanded.shape, device=device)
+            
+            noisy_images = noise_scheduler.add_noise(images_expanded, noise, timesteps).to(torch.float32)
             outputs = model.forward(noisy_images, timesteps)
 
-            if isinstance(model, UNet2DModel):
-                # for whatever reason, the outputs are a wrapper around a tensor.
+
+            if hasattr(outputs, 'sample'):
+                # for whatever reason, the outputs of UNet2DModel are a wrapper around a tensor.
                 outputs = outputs.sample
 
-            loss = criterion(outputs, noise)
+            loss = val_criterion(outputs, noise)
 
-            loss_value = loss.item()
+            # compute the mean across all dimensions expect the batch dimension
+            loss = loss.mean(dim=tuple(range(1, len(loss.shape)))) 
+            # at this point the loss must be a tensor of shape (bs * n_ts,)
+            # The layout is [loss_img1_ts1, ..., loss_imgN_ts1, loss_img1_ts2, ..., loss_imgN_ts2, ...]
+
+            # Reshape to (n_ts, batch_size) to group losses by timestep
+            loss_per_ts_view = loss.view(n_ts, batch_size)
+
+            # Update total loss for each timestep
+            for i, ts in enumerate(validation_timesteps):
+                epoch_val_loss_per_ts[ts] += loss_per_ts_view[i].sum().item()
+
+            loss_value = loss.mean().item()
             val_batch_losses[batch_idx] = loss_value 
             val_loop.set_postfix(loss=loss_value)
 
             # Update statistics
-            epoch_val_loss += images.shape[0] * loss_value # multiply by the number of samples in the batch (since batch_loss is the averaged loss per sample... the averaging for the epoch-level loss is done at the end)
+            epoch_val_loss += loss.sum().item() # multiply by the number of samples in the batch (since batch_loss is the averaged loss per sample... the averaging for the epoch-level loss is done at the end)
             
             if logger is not None and epoch is not None:
                 global_step = epoch * len(val_loader) + batch_idx
                 logger.log_scalar('Loss/val_batch', loss_value, global_step)
 
-        avg_loss = round(epoch_val_loss / val_num_samples, 4)
-        return avg_loss, val_batch_losses
+        total_processed = val_num_samples * n_ts
+        avg_loss = round(epoch_val_loss / total_processed, 8)
 
+        avg_loss_per_ts = {ts: round(total_loss / val_num_samples, 8) for ts, total_loss in epoch_val_loss_per_ts.items()}
 
-
-def sample_with_diffusers(model: UNet2DModel, 
-                          noise_scheduler: DDPMScheduler,
-                          device: torch.device,
-                          num_samples: int = 10,
-                          num_inference_steps: int = 10) -> torch.Tensor:
-    
-    
-    # set the number of inference time steps
-    noise_scheduler.set_timesteps(num_inference_steps=num_inference_steps)
-    
-    pipeline = DDPMPipeline(unet=model, scheduler=noise_scheduler)
-    pipeline.to(device)
-
-    images = pipeline(
-        batch_size=num_samples,
-        generator=torch.Generator(device='cpu').manual_seed(42),
-        output_type="tensor", # if output_type is "pil", it will return a list of PIL images, any other value it will return a numpy array
-        num_inference_steps=num_inference_steps
-    ).images
-
-    # convert to tensor and return
-    return torch.from_numpy(images.transpose(0, 3, 1, 2)) * 255.0
-
-
-def sample_manual(model: DiffusionUNetOneDim, 
-                    images: torch.Tensor,
-                    noise_scheduler: DDPMScheduler,
-                    device: torch.device,
-                    num_inference_steps: int = 1000,
-                    ) -> torch.Tensor:
-    
-    model = model.to(device)
-    model.eval()
-
-    noise_scheduler.set_timesteps(num_inference_steps=num_inference_steps)
-
-    samples = torch.randn(*images.shape, device=device)
-
-    for _, t in enumerate(tqdm(noise_scheduler.timesteps, desc="Sampling")):
-    
-        with torch.no_grad():
-            # 1. predict noise residual
-            residual = model.forward(samples, torch.ones(samples.shape[0], device=device) * t) # generate images with the same label and the same masks as the validation batch
-            
-            if isinstance(model, UNet2DModel):
-                # for whatever reason, the outputs are a wrapper around a tensor.
-                residual = residual.sample
-
-            # 2. compute previous image and set x_t -> x_t-1
-            samples = noise_scheduler.step(residual, t, samples).prev_sample
-
-    return samples
-
-
-def sample_from_diffusion_model(model: Union[DiffusionUNetOneDim, UNet2DModel], 
-                          noise_scheduler: DDPMScheduler,
-                          device: torch.device,
-                          images: torch.Tensor,
-                          num_samples: int = 10,
-                          num_inference_steps: int = 10) -> Tuple[torch.Tensor, bool]:
-    
-    if isinstance(model, UNet2DModel):
-        return sample_with_diffusers(model, noise_scheduler, device, num_samples, num_inference_steps), False
-    else:
-        return sample_manual(model, images, noise_scheduler, device, num_inference_steps), True
-
-
-def val_sample_diffusion_epoch(model: DiffusionUNetOneDim, 
-                        noise_scheduler: DDPMScheduler,
-                        val_loader: DataLoader, 
-                        device: torch.device,
-                        logger: BaseLogger,
-                        log_dir: P,
-                        epoch: int,
-                        debug: bool = False):
-    """
-    Run one epoch of validation.
-    
-    Args:
-        model: The model to validate
-        val_loader: DataLoader for validation data
-        criterion: Loss function
-        device: Device to validate on
-    
-    Returns:
-        Average validation loss for the epoch
-    """
-
-    with torch.no_grad():
-        val_loop = tqdm(val_loader, desc="Sampling validation")
-
-        for batch_idx, images in enumerate(val_loop):
-            
-            if batch_idx >= 2:
-                break
-
-            images = images.to(device)
-            
-            images = (images / 127.5) - 1.0 
-
-            if not torch.all(images >= -1.0) or not torch.all(images <= 1.0):
-                raise ValueError("Images must be scaled to the [-1, 1] range.")
-
-            diffusion_samples, scale_images = sample_from_diffusion_model(model, noise_scheduler, device, images[:10], 
-                                                num_samples=10, 
-                                                num_inference_steps=250)
-
-            epoch_dir = os.path.join(log_dir, 'samples', f"epoch_{epoch+1}")
-            dirf.process_path(epoch_dir, dir_ok=True, file_ok=False, must_exist=False)
-
-            for i, s in enumerate(diffusion_samples):
-                # rescale to [0, 255] for saving and visualization
-
-                if scale_images:
-                    vis_s = (s + 1) * 127.5
-                else:
-                    vis_s = s
-
-                logger.log_image(f"sample_{batch_idx}_{i}", vis_s, epoch)
-
-
-                if debug:
-                    visualize(vis_s, window_name=f"sampled_image_{batch_idx}_{i}")
-
-                # convert to numpy for saving
-                if vis_s.shape[0] >= 3: # (C, H, W) with C > 3
-                    save_s = vis_s.cpu().permute(1, 2, 0)
-                else: # (C, H, W) with C <= 3
-                    save_s = vis_s.cpu().squeeze(0)
-                    
-                save_s = save_s.numpy().astype(np.uint8)
-                Image.fromarray(save_s).save(os.path.join(epoch_dir, f"sample_{batch_idx}_{i}.png"))
+        return avg_loss, val_batch_losses, avg_loss_per_ts
 
 
 def train_diffusion_model(model: Union[DiffusionUNetOneDim, UNet2DModel], 
                noise_scheduler: DDPMScheduler,
                train_loader: DataLoader, 
-               val_loader: DataLoader, 
+               val_loader: Optional[DataLoader], 
                criterion: torch.nn.Module, 
                optimizer: torch.optim.Optimizer, 
                lr_scheduler: torch.optim.lr_scheduler.LRScheduler,
@@ -363,7 +273,8 @@ def train_diffusion_model(model: Union[DiffusionUNetOneDim, UNet2DModel],
                log_dir: P,
                val_per_epoch: int = 5,
                max_grad_norm: float = 1.0,
-               debug: bool = False) -> Union[DiffusionUNetOneDim, UNet2DModel]:
+               debug: bool = False,
+               validation_timesteps: Optional[list] = None) -> Union[DiffusionUNetOneDim, UNet2DModel]:
     """
     Train the model and validate it periodically.
     
@@ -417,33 +328,45 @@ def train_diffusion_model(model: Union[DiffusionUNetOneDim, UNet2DModel],
         all_train_losses.append(train_loss)
 
         # Validation phase
-        val_loss, val_batch_losses = val_epoch(
+        if val_loader is None:
+            print(f"Epoch {epoch+1}/{num_epochs}, Train Loss: {train_loss:.8f}")
+            continue 
+
+        if validation_timesteps is None:
+            raise ValueError("validation_timesteps must be provided when a validation loader is present.")
+
+        val_loss, val_batch_losses, val_loss_per_ts = val_epoch(
             model=model,
             noise_scheduler=noise_scheduler,
             val_loader=val_loader,
             criterion=criterion,
+            validation_timesteps=validation_timesteps,
             device=device,
             logger=logger,
             epoch=epoch
         )
 
-        logger.log_scalar('Loss/val_epoch', val_loss, epoch)
         all_val_losses.append(val_loss)
 
-        print(f"Epoch {epoch+1}/{num_epochs}, Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
+
+
+        print(f"Epoch {epoch+1}/{num_epochs}, Train Loss: {train_loss:.8f}, Val Loss: {val_loss:.8f}")
 
         # Log epoch losses
-        logger.log_scalar('Loss/train_epoch', train_loss, epoch)
         logger.log_scalar('Loss/val_epoch', val_loss, epoch)
+        # save the validation epoch loss per timestep        
+        for ts, loss in val_loss_per_ts.items():
+            logger.log_scalar(f'Loss/val_epoch_ts_{ts}', loss, epoch)
+
 
         if (epoch + 1) % val_per_epoch == 0:
-            val_sample_diffusion_epoch(model, noise_scheduler, val_loader, device, logger, log_dir, epoch, debug)
+            sample_diffusion_epoch(model, noise_scheduler, val_loader, device, logger, log_dir, epoch, debug)
 
         # Save the model if validation loss improves
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             torch.save(model.state_dict(), os.path.join(log_dir, 'best_model.pth'))
-            print(f"Model saved with validation loss: {val_loss:.4f}")
+            print(f"Model saved with validation loss: {val_loss:.8f}")
 
             # if the model is a UNet2DModel, save the model in a way that can be loaded by the diffusers library
             if isinstance(model, UNet2DModel):
@@ -454,7 +377,7 @@ def train_diffusion_model(model: Union[DiffusionUNetOneDim, UNet2DModel],
                     shutil.rmtree(save_path)
 
                 pipeline.save_pretrained(save_path) 
-                print(f"Model saved in diffusers format with validation loss: {val_loss:.4f}")
+                print(f"Model saved in diffusers format with validation loss: {val_loss:.8f}")
 
             
     return model

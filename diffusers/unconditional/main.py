@@ -94,7 +94,7 @@ def inference(folder_path: P, num_samples: int = 20, num_inference_steps: int = 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     pipeline = DDPMPipeline.from_pretrained(folder_path)
     pipeline.to(device)
-    images = pipeline(batch_size=num_samples, num_inference_steps=num_inference_steps, return_dict=False).images
+    images = pipeline(batch_size=num_samples, num_inference_steps=num_inference_steps).images
     
     for i, im in enumerate(images):
         visualize(im, window_name=f"sampled_image_{i}")
