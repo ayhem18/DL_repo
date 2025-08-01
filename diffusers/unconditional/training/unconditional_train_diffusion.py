@@ -154,7 +154,7 @@ def train_epoch(model: Union[DiffusionUNetOneDim, UNet2DModel],
         if hasattr(outputs, 'sample'):
             outputs = outputs.sample
 
-        per_sample_loss = criterion(outputs, noise).mean(dim=tuple(range(1, len(outputs.shape)))).detach() # no need to keep track of the gradients of this variable
+        per_sample_loss = criterion(outputs, noise).mean(dim=tuple(range(1, len(outputs.shape)))) 
         loss = per_sample_loss.mean()
 
         if debug:

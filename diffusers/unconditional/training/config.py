@@ -68,4 +68,5 @@ class TrainingConfig(Config):
     timestep_bins = [50, 500, 1000] # the bins should end with the total number of timesteps
     validation_timesteps = [10, 50, 250, 500, 999] # the validation timesteps must be < the total number of timesteps
 
+    timesteps_sampler_type: str = "log"
 

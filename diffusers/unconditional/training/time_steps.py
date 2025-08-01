@@ -16,6 +16,7 @@ class AbstractTimeStepsSampler(ABC):
         """Update the sampler."""
         pass
 
+
 class UniformTimeStepsSampler(AbstractTimeStepsSampler):
     """Samples timesteps uniformly."""
     def sample(self, batch_size: int, device: torch.device) -> torch.Tensor:
@@ -36,11 +37,11 @@ class UniformTimeStepsSampler(AbstractTimeStepsSampler):
 class LogTimeStepsSampler(AbstractTimeStepsSampler):
     """Samples timesteps using a log-uniform distribution."""
     def sample(self, batch_size: int, device: torch.device) -> torch.Tensor:
-        log_min = torch.log(torch.tensor(1e-1))
+        # log_min is 0 since exp(0) = 1 and we want to sample from 1 to num_train_timesteps - 1 (since 0 is the first timestep and there is no learning if the the model is asked to predict the identity function)
         log_max = torch.log(torch.tensor(float(self.num_train_timesteps - 1)))
-        log_timesteps = torch.rand(batch_size, device=device) * (log_max - log_min) + log_min
+        log_timesteps = torch.rand(batch_size, device=device) * log_max 
         timesteps = torch.exp(log_timesteps).long()
-        return torch.clamp(timesteps, 0, self.num_train_timesteps - 1)
+        return torch.clamp(timesteps, 1, self.num_train_timesteps - 1)
 
     def update(self, *args, **kwargs) -> None:
         """
@@ -53,6 +54,9 @@ class LogTimeStepsSampler(AbstractTimeStepsSampler):
 
 def set_timesteps_sampler(sampler_type: str, num_train_timesteps: int, **kwargs) -> AbstractTimeStepsSampler:
     """Factory function to get a timestep sampler."""
+    # TODO: add some checks to make sure that the sampler receives the correct arguments
+    # for example, a bin-based sampler should receive the bin boundaries as an argument 
+    # an adaptive sampler might need some other arguments (to be defined later xD )
     if sampler_type == "uniform":
         return UniformTimeStepsSampler(num_train_timesteps, **kwargs)
     elif sampler_type == "log":
