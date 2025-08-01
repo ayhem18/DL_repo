@@ -12,9 +12,10 @@ from mypt.visualization.general import visualize
 
 
 from training.model import set_model
-from training.train import train_diffusion_model
+from training.time_steps import set_timesteps_sampler
 from training.data import set_data, prepare_log_directory
 from training.config import ModelConfig, OptimizerConfig, TrainingConfig
+from training.unconditional_train_diffusion import train_diffusion_model
 
 
 def main():
@@ -68,6 +69,7 @@ def main():
         num_epochs=train_config.num_epochs,
         timestep_bins=train_config.timestep_bins,
         validation_timesteps=train_config.validation_timesteps,
+        timesteps_sampler_type=train_config.timesteps_sampler,
         device=device, 
         logger=logger,
         log_dir=exp_log_dir,
