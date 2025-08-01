@@ -35,9 +35,11 @@ def _normalize_images(images: torch.Tensor) -> torch.Tensor:
 def _prepare_bins(timestep_bins: List[int], num_train_steps: int) -> Tuple[torch.Tensor, List[str]]:
     bin_boundaries = torch.tensor([0] + timestep_bins, device='cpu')
     bin_labels = [f'{bin_boundaries[i]}-{bin_boundaries[i+1]-1}' for i in range(len(bin_boundaries)-1)]
-    max_ts = num_train_steps
-    if max_ts > bin_boundaries[-1]:
-         bin_labels.append(f'{bin_boundaries[-1]}-{max_ts-1}')
+    
+    # the last value of the bin boundaries must be equal to the number of training steps
+    if bin_boundaries[-1] != num_train_steps:
+        raise ValueError(f"The last bin boundary must be equal to the number of training steps, but it is {bin_boundaries[-1]} and the number of training steps is {num_train_steps}")
+
     return bin_boundaries, bin_labels
 
 
@@ -70,7 +72,6 @@ def _compute_bin_losses(bin_boundaries: torch.Tensor,
         train_count_per_bin[label] += 1
 
     
-
 def train_epoch(model: Union[DiffusionUNetOneDim, UNet2DModel], 
                 noise_scheduler: DDPMScheduler,
                 train_loader: DataLoader, 
@@ -234,7 +235,9 @@ def train_epoch_logging(
 
     all_train_losses.append(train_loss)
 
-
+    # Update the timestep sampler if it has an update method
+    if hasattr(timesteps_sampler, 'update'):
+        timesteps_sampler.update(train_loss_per_bin)
 
 
 def val_epoch(model: Union[DiffusionUNetOneDim, UNet2DModel], 
@@ -349,7 +352,6 @@ def val_epoch_logging(
     # save the validation epoch loss per timestep        
     for ts, loss in val_loss_per_ts.items():
         logger.log_scalar(f'Loss/val_epoch_ts_{ts}', loss, epoch)
-
 
 
 

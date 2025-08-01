@@ -1,6 +1,6 @@
 import json
 
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 from dataclasses import asdict, dataclass
 
 from mypt.shortcuts import P
@@ -57,16 +57,12 @@ class OptimizerConfig(Config):
     # weight_decay: float = 0.0
     # lr_warmup_steps: int = 100
 
-@dataclass
 class TrainingConfig(Config):
-    dataset: str = "butterflies"
-    train_batch_size: int = 64
-    val_batch_size: int = 16
     num_epochs: int = 50
-    seed: int = 42
-
-    timestep_bins = [50, 500, 1000] # the bins should end with the total number of timesteps
-    validation_timesteps = [10, 50, 250, 500, 999] # the validation timesteps must be < the total number of timesteps
-
-    timesteps_sampler_type: str = "log"
+    val_per_epoch: int = 5
+    max_grad_norm: float = 1.0
+    validation_timesteps: Optional[list] = [10, 50, 100, 250, 500, 750, 999]
+    timestep_bins: Optional[list] = [50, 250, 500, 1000]
+    loss_thresholds: Optional[list] = [0.1, 0.05, 0.02, 0.01]
+    timesteps_sampler_type: str = "curriculum"
 
