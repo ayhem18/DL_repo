@@ -2,7 +2,7 @@ import torch
 
 from tqdm import tqdm
 from torch.utils.data import DataLoader
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 from diffusers.models.unets.unet_2d import UNet2DModel
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 
@@ -235,10 +235,6 @@ def train_epoch_logging(
 
     all_train_losses.append(train_loss)
 
-    # Update the timestep sampler if it has an update method
-    if hasattr(timesteps_sampler, 'update'):
-        timesteps_sampler.update(train_loss_per_bin)
-
 
 def val_epoch(model: Union[DiffusionUNetOneDim, UNet2DModel], 
             noise_scheduler: DDPMScheduler,
@@ -371,7 +367,9 @@ def train_diffusion_model(model: Union[DiffusionUNetOneDim, UNet2DModel],
                timesteps_sampler_type: str,
                val_per_epoch: int = 5,
                max_grad_norm: float = 1.0,
-               debug: bool = False) -> Union[DiffusionUNetOneDim, UNet2DModel]:
+               debug: bool = False,
+               time_steps_kwargs: Dict[str, Any] = {}
+               ) -> Union[DiffusionUNetOneDim, UNet2DModel]:
     """
     Train the model and validate it periodically.
     
@@ -393,10 +391,6 @@ def train_diffusion_model(model: Union[DiffusionUNetOneDim, UNet2DModel],
     all_val_losses = []
     
     train_loop = tqdm(range(num_epochs), desc="Training loop")
-
-    # get the sampler 
-    # depending on the type of the sampler we might need additional arguments (possibly a bin-based sampler or an adaptive sampler)
-    time_steps_kwargs = {}
 
     timesteps_sampler = set_timesteps_sampler(timesteps_sampler_type, noise_scheduler.config.num_train_timesteps, **time_steps_kwargs)
 
@@ -422,6 +416,9 @@ def train_diffusion_model(model: Union[DiffusionUNetOneDim, UNet2DModel],
         # get the learning rate of the current epoch:
         # use the optimizer to get the learning rate
         epoch_lr = optimizer.param_groups[0]['lr'] 
+
+        # update the timestep sampler with the loss per bin
+        timesteps_sampler.update(train_loss_per_bin)
 
         # track the metrics
         train_epoch_logging(

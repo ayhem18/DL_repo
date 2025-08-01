@@ -46,12 +46,12 @@ def main():
 
     noise_scheduler = DDPMScheduler(num_train_timesteps=1000)
 
-    timesteps_sampler = set_timesteps_sampler(
-        train_config.timesteps_sampler_type, 
-        noise_scheduler.config.num_train_timesteps,
-        bins=train_config.timestep_bins,
-        thresholds=train_config.loss_thresholds
-    )
+    # timesteps_sampler = set_timesteps_sampler(
+    #     train_config.timesteps_sampler_type, 
+    #     noise_scheduler.config.num_train_timesteps,
+    #     bins=train_config.timestep_bins,
+    #     thresholds=train_config.loss_thresholds
+    # )
 
     # why ? no good reason, just copied from 
     # https://colab.research.google.com/github/huggingface/notebooks/blob/main/diffusers/training_example.ipynb#scrollTo=my90vVcmxU5V
@@ -76,12 +76,18 @@ def main():
         num_epochs=train_config.num_epochs,
         timestep_bins=train_config.timestep_bins,
         validation_timesteps=train_config.validation_timesteps,
-        timesteps_sampler=timesteps_sampler,
+        timesteps_sampler_type=train_config.timesteps_sampler_type,
         device=device, 
         logger=logger,
         log_dir=exp_log_dir,
         debug=False,
-        val_per_epoch=5 
+        val_per_epoch=train_config.val_per_epoch,
+        
+        # time_steps_kwargs are passed to the set_timesteps_sampler function
+        time_steps_kwargs={
+            "bins": train_config.timestep_bins,
+            "thresholds": train_config.loss_thresholds
+        }
     )
     
     # save the model in a way that can be loaded by the diffusers library
@@ -89,8 +95,10 @@ def main():
         pipeline = DDPMPipeline(unet=trained_model, scheduler=noise_scheduler)
         pipeline.save_pretrained(os.path.join(exp_log_dir, 'model')) 
 
+    else:
+        # TODO: save my custom model
+        pass
 
-    # save custom model 
     # Save the config
     model_config.save(os.path.join(exp_log_dir, 'model_config.json'))
     opt_config.save(os.path.join(exp_log_dir, 'opt_config.json'))

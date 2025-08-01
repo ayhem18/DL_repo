@@ -67,14 +67,13 @@ class CurriculumTimeStepsSampler(AbstractTimeStepsSampler):
                 thresholds: List[float]):
         super().__init__(num_train_timesteps)
         
-        if len(bins) != len(thresholds) - 1:
+        if len(bins) != len(thresholds) + 1:
             raise ValueError("the number of thresholds must be less than the number of bins by 1. The first bin is automatically activated (doesn't need a threhsold)")
 
-        self.bin_boundaries = torch.tensor(bins)
-        self.num_bins = len(self.bin_boundaries)
+        self.bin_boundaries = torch.tensor([0] + bins)
+        self.num_bins = len(bins)
 
-        self.bin_labels = [f'{0}-{bins[0]-1}']
-        self.bin_labels = self.bin_labels + [f'{self.bin_boundaries[i]}-{self.bin_boundaries[i+1]-1}' for i in range(self.num_bins - 1)]
+        self.bin_labels = [f'{self.bin_boundaries[i]}-{self.bin_boundaries[i+1]-1}' for i in range(self.num_bins)]
 
         self.thresholds = thresholds        
         self.active_bin_idx = self.num_bins - 1
@@ -127,7 +126,7 @@ class CurriculumTimeStepsSampler(AbstractTimeStepsSampler):
             return
 
         current_stage_label = self.bin_labels[self.active_bin_idx]
-        current_stage_threshold = self.thresholds[self.active_bin_idx]
+        current_stage_threshold = self.thresholds[self.active_bin_idx - 1]
         
         loss_for_current_stage = self.last_epoch_losses.get(current_stage_label, float('inf'))
 

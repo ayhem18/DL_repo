@@ -45,24 +45,19 @@ class ModelConfig(Config):
 
 @dataclass
 class OptimizerConfig(Config):
-
-    # lr scheduler: every epoch
-    # lr: 1e-3 works for batch sizes of 8 to 16, training diverges for batch sizes of 32 and above 
-    
-    # lr scheduler: every step
-    # let's see how it goes
-
     learning_rate: float = 1e-4
     num_warmup_steps: int = 250
-    # weight_decay: float = 0.0
-    # lr_warmup_steps: int = 100
+    max_grad_norm: float = 1.0
 
 class TrainingConfig(Config):
+    dataset: str = "butterflies"
+    train_batch_size: int = 64
+    val_batch_size: int = 16
+
     num_epochs: int = 50
     val_per_epoch: int = 5
-    max_grad_norm: float = 1.0
     validation_timesteps: Optional[list] = [10, 50, 100, 250, 500, 750, 999]
     timestep_bins: Optional[list] = [50, 250, 500, 1000]
-    loss_thresholds: Optional[list] = [0.1, 0.05, 0.02, 0.01]
+    loss_thresholds: Optional[list] = [0.05, 0.02, 0.01]
     timesteps_sampler_type: str = "curriculum"
 
