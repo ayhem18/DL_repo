@@ -57,7 +57,7 @@ def _compute_bin_losses(bin_boundaries: torch.Tensor,
         timesteps (torch.Tensor): the timesteps of the samples
         per_sample_loss (torch.Tensor): the loss per sample
         train_loss_per_bin (Dict[str, float]): the accumulated loss for samples that belong to a bin (across the entire epoch)
-        train_count_per_bin (Dict[str, int]): the accumulated number of samples that belong to a bin
+        train_count_per_bin (Dict[str, int]): the accumulated number of samples that belong to a bin (across the entire epoch)
     """
 
     bin_indices = torch.bucketize(timesteps.cpu(), bin_boundaries, right=False)
@@ -80,12 +80,14 @@ def train_epoch(model: Union[DiffusionUNetOneDim, UNet2DModel],
                 device: torch.device,
                 timestep_bins: List[int],
                 timesteps_sampler: AbstractTimeStepsSampler,
+                epoch: int,
+                global_step: int, # it is possible that the global step is different from epoch * len(train_loader) (drop_last=False...)
                 logger: Optional[BaseLogger] = None,
-                epoch: Optional[int] = None,
                 max_grad_norm: float = 1.0,
                 debug: bool = False,
                 lr_scheduler: Optional[torch.optim.lr_scheduler.LRScheduler] = None, 
-                epoch_lr: Optional[float] = None) -> Tuple[float, List[float], Dict[str, float]]:
+                epoch_lr: Optional[float] = None
+                ) -> Tuple[float, List[float], Dict[str, float], Dict[str, int], Dict[str, float]]:
     """
     Run one epoch of training.
     
@@ -99,7 +101,11 @@ def train_epoch(model: Union[DiffusionUNetOneDim, UNet2DModel],
         epoch: Current epoch number
     
     Returns:
-        Average training loss for the epoch and list of batch losses
+        1. Average training loss for the epoch
+        2. List of batch losses
+        3. Dictionary of average training loss per bin (across the entire epoch)
+        4. Dictionary of number of samples per bin (across the entire epoch)
+        5. Dictionary of bin probabilities (across the entire epoch)
     """
 
     if not hasattr(criterion, 'reduction'):
@@ -114,7 +120,7 @@ def train_epoch(model: Union[DiffusionUNetOneDim, UNet2DModel],
     model = model.to(device)
     model.train()
     
-    train_loss = 0.0
+    total_train_loss = 0.0
     num_train_samples = 0
     batch_losses = [None for _ in range(len(train_loader))]
     
@@ -124,7 +130,7 @@ def train_epoch(model: Union[DiffusionUNetOneDim, UNet2DModel],
     train_loss_per_bin = {label: 0.0 for label in bin_labels}
     train_count_per_bin = {label: 0 for label in bin_labels}
 
-    train_loop = tqdm(train_loader, desc=f"Training epoch {epoch or ''}")
+    train_loop = tqdm(train_loader, desc=f"Training epoch {epoch}")
 
 
     debug_samples = []
@@ -135,7 +141,6 @@ def train_epoch(model: Union[DiffusionUNetOneDim, UNet2DModel],
         # normalize the images to the [-1, 1] range.
         # TODO: think of a more efficient way to do this
         images = _normalize_images(images).to(device)
-        num_train_samples += images.shape[0]
 
         # Zero the parameter gradients
         optimizer.zero_grad()
@@ -143,9 +148,8 @@ def train_epoch(model: Union[DiffusionUNetOneDim, UNet2DModel],
         # create noise
         noise = torch.randn(images.shape, device=images.device)
 
-        # assign a random timestep (between 0 and the maximum number of timesteps) 
-        # to each image in the batch
-        timesteps = timesteps_sampler.sample(batch_size=images.shape[0], device=images.device)
+        # bin_probs_log are the same across the entire epoch (they only change by calling the update method which is called at the end of each epoch...)
+        timesteps, bin_probs_log = timesteps_sampler.sample(batch_size=images.shape[0], device=images.device)
 
         # add noise to the images
         noisy_images = noise_scheduler.add_noise(images, noise, timesteps).to(torch.float32)
@@ -176,24 +180,21 @@ def train_epoch(model: Union[DiffusionUNetOneDim, UNet2DModel],
         if lr_scheduler is not None:
             lr_scheduler.step()
 
-        # batch loss
-        batch_loss = loss.item()
-        batch_losses[batch_idx] = batch_loss
-
-        train_loss += images.shape[0] * batch_loss # multiply by the number of samples in the batch (since batch_loss is the averaged loss per sample... the averaging for the training loss is done at the end)
-        train_loop.set_postfix(loss=batch_loss)
+        # log all batch information
+        global_step, num_train_samples, total_train_loss = train_batch_level_logging(
+            per_sample_batch_loss=per_sample_loss.detach().cpu(),
+            batch_idx=batch_idx,
+            global_step=global_step,
+            num_train_samples=num_train_samples,
+            total_train_loss=total_train_loss,
+            logger=logger,
+            train_loop=train_loop,
+            batch_losses=batch_losses,
+            lr_scheduler=lr_scheduler,
+        )
 
         _compute_bin_losses(bin_boundaries, bin_labels, timesteps, per_sample_loss, train_loss_per_bin, train_count_per_bin)
         
-        # Log batch loss to TensorBoard if logger is provided
-        if logger is not None and epoch is not None:
-            global_step = epoch * len(train_loader) + batch_idx
-            logger.log_scalar('Loss/train_batch', batch_loss, global_step)
-
-        # log the loss and the learning rate to the tqdm progress bar
-        # prioritize the lr_scheduler if it is provided
-        epoch_lr = lr_scheduler.get_last_lr()[0] if lr_scheduler is not None else epoch_lr
-        train_loop.set_postfix(**{'batch_loss': batch_loss, 'lr': epoch_lr})
 
     if debug:
         for i, (s, t, l) in enumerate(zip(debug_samples[:10], debug_samples_timesteps[:10], loss_on_debug_samples[:10])):
@@ -202,19 +203,67 @@ def train_epoch(model: Union[DiffusionUNetOneDim, UNet2DModel],
             visualize(s, window_name=f"Debug Sample {i} - timestep: {t.item()} - loss: {l:.4f}")
 
 
-    avg_loss = round(train_loss / num_train_samples, 8)
+    avg_loss = round(total_train_loss / num_train_samples, 8)
 
     # keep only the bins that have at least one sample
     avg_train_loss_per_bin = dict([(label, train_loss_per_bin[label] / train_count_per_bin[label]) for label in bin_labels if train_count_per_bin[label]])
 
-    return avg_loss, batch_losses, avg_train_loss_per_bin
+    return avg_loss, batch_losses, avg_train_loss_per_bin, train_count_per_bin, bin_probs_log
 
 
-def train_epoch_logging(       
+def train_batch_level_logging(
+                        # metrics 
+                        per_sample_batch_loss: torch.Tensor,
+                        batch_idx: int,
+                        global_step: int,
+                        num_train_samples: int,
+                        total_train_loss: float,
+                        # variables used to track the training metrics : make sure they are passed by reference !!!!
+                        logger: BaseLogger, 
+                        train_loop: tqdm,
+                        batch_losses: List[float],
+                        lr_scheduler: Optional[torch.optim.lr_scheduler.LRScheduler] = None,
+                        ) -> Tuple[int, int, float]:
+    """
+    This function groups all the logging and tracking logic for the training batch
+    """
+    # compute the new global step
+    new_global_step = global_step + batch_idx
+
+    # compute the new num_train_samples
+    new_num_train_samples = num_train_samples + per_sample_batch_loss.shape[0]
+
+    # compute the new total train loss
+    new_total_train_loss = total_train_loss + per_sample_batch_loss.sum().item()
+
+    # compute the batch loss
+    batch_loss = per_sample_batch_loss.mean().item() 
+
+    # set the batch loss in the batch_losses list
+    batch_losses[batch_idx] = batch_loss
+
+    # log the batch loss to the logger
+    logger.log_scalar('Loss/train_batch', batch_loss, new_global_step)
+
+    # log the batch loss to the tqdm progress bar
+    train_loop.set_postfix(**{'batch_loss': batch_loss})
+
+    # log the learning rate if the lr_scheduler is provided
+    # quite important if the lr_scheduler is updated at every batch (not at the end of the epoch)
+    if lr_scheduler is not None:
+        epoch_lr = lr_scheduler.get_last_lr()[0]
+        logger.log_scalar('Params/learning_rate', epoch_lr, new_global_step)
+
+    return new_global_step, new_num_train_samples, new_total_train_loss
+
+
+def train_epoch_level_logging(       
                         # metrics from the training epoch
                         train_loss: float,
-                        epoch_lr: float,
+                        epoch_lr: float,    # learning rate of the current epoch
                         train_loss_per_bin: Dict[str, float],
+                        train_count_per_bin: Dict[str, int],
+                        bin_probs_log: Dict[str, float],
                         epoch: int, 
 
                         # variables used to track the training metrics : make sure they are passed by reference !!!!
@@ -230,8 +279,17 @@ def train_epoch_logging(
     
     logger.log_scalar('Loss/train_epoch', train_loss, epoch)
 
+    # log the epoch loss per bin
     for bin_label, loss in train_loss_per_bin.items():
         logger.log_scalar(f'Loss/train_epoch_bin_{bin_label}', loss, epoch)
+
+    # log the number of samples per bin
+    for bin_label, count in train_count_per_bin.items():
+        logger.log_scalar(f'TrainCount/train_count_bin_{bin_label}', count, epoch)
+
+    # log the bin probabilities 
+    for bin_label, prob in bin_probs_log.items():
+        logger.log_scalar(f'BinProbs/pbin_{bin_label}', prob, epoch)
 
     all_train_losses.append(train_loss)
 
@@ -331,7 +389,7 @@ def val_epoch(model: Union[DiffusionUNetOneDim, UNet2DModel],
         return avg_loss, val_batch_losses, avg_loss_per_ts
 
 
-def val_epoch_logging(
+def val_epoch_level_logging(
                         # metrics from the validation epoch
                         val_loss: float,
                         val_loss_per_ts: Dict[int, float],
@@ -394,10 +452,12 @@ def train_diffusion_model(model: Union[DiffusionUNetOneDim, UNet2DModel],
 
     timesteps_sampler = set_timesteps_sampler(timesteps_sampler_type, noise_scheduler.config.num_train_timesteps, **time_steps_kwargs)
 
+    global_step = 0
+
     for epoch in train_loop:
 
         # Training phase
-        train_loss, batch_losses, train_loss_per_bin = train_epoch(
+        train_loss, batch_losses, train_loss_per_bin, train_count_per_bin, bin_probs_log = train_epoch(
             model=model,
             noise_scheduler=noise_scheduler,
             train_loader=train_loader,
@@ -408,10 +468,14 @@ def train_diffusion_model(model: Union[DiffusionUNetOneDim, UNet2DModel],
             timesteps_sampler=timesteps_sampler,
             logger=logger,
             epoch=epoch,
+            global_step=global_step,
             max_grad_norm=max_grad_norm,
             debug=debug,
             lr_scheduler=lr_scheduler,
         )
+
+        # update the global step by adding the number of batches in the current epoch: len(train_loader) 
+        global_step += len(train_loader)
 
         # get the learning rate of the current epoch:
         # use the optimizer to get the learning rate
@@ -420,11 +484,13 @@ def train_diffusion_model(model: Union[DiffusionUNetOneDim, UNet2DModel],
         # update the timestep sampler with the loss per bin
         timesteps_sampler.update(train_loss_per_bin)
 
-        # track the metrics
-        train_epoch_logging(
+        # log metrics at the epoch level
+        train_epoch_level_logging(
             train_loss=train_loss,
             epoch_lr=epoch_lr,
             train_loss_per_bin=train_loss_per_bin,
+            train_count_per_bin=train_count_per_bin,
+            bin_probs_log=bin_probs_log,
             epoch=epoch,
             logger=logger,
             train_loop=train_loop,
@@ -452,7 +518,7 @@ def train_diffusion_model(model: Union[DiffusionUNetOneDim, UNet2DModel],
         print(f"Epoch {epoch+1}/{num_epochs}, Train Loss: {train_loss:.8f}, Val Loss: {val_loss:.8f}")
 
         # track the metrics
-        val_epoch_logging(
+        val_epoch_level_logging(
             val_loss=val_loss,
             val_loss_per_ts=val_loss_per_ts,
             epoch=epoch,

@@ -106,8 +106,6 @@ def main():
     print("Training completed!")
 
 
-
-
 def inference(folder_path: P, num_samples: int = 20, save_image_path: P = None, num_inference_steps: int = 250):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     pipeline = DDPMPipeline.from_pretrained(folder_path)
@@ -125,20 +123,24 @@ def inference(folder_path: P, num_samples: int = 20, save_image_path: P = None, 
 
 if __name__ == '__main__':
     main()
+
     # script_dir = os.path.dirname(os.path.abspath(__file__))
     # runs_dir = os.path.join(script_dir, 'training', 'runs')
-    # run1, ckpnt1 = os.path.join(runs_dir, 'run_1', 'inference'), os.path.join(runs_dir, 'run_1', 'model')
-    # run2, ckpnt2 = os.path.join(runs_dir, 'run_2', 'inference'), os.path.join(runs_dir, 'run_2', 'model')
-    # run3, ckpnt3 = os.path.join(runs_dir, 'run_3', 'inference'), os.path.join(runs_dir, 'run_3', 'model')
+    # # run1, ckpnt1 = os.path.join(runs_dir, 'run_1', 'inference'), os.path.join(runs_dir, 'run_1', 'model')
+    # # run2, ckpnt2 = os.path.join(runs_dir, 'run_2', 'inference'), os.path.join(runs_dir, 'run_2', 'model')
+    # # run3, ckpnt3 = os.path.join(runs_dir, 'run_3', 'inference'), os.path.join(runs_dir, 'run_3', 'model')
 
-    # dirf.process_path(run1, dir_ok=True, file_ok=False, must_exist=False)
-    # dirf.process_path(run2, dir_ok=True, file_ok=False, must_exist=False)
-    # dirf.process_path(run3, dir_ok=True, file_ok=False, must_exist=False)
+    # run6, ckpnt6 = os.path.join(runs_dir, 'run_6', 'inference'), os.path.join(runs_dir, 'run_6', 'model')
 
 
-    # inference(ckpnt1, num_samples=20, num_inference_steps=1000, save_image_path=run1)
-    # inference(ckpnt2, num_samples=20, num_inference_steps=1000, save_image_path=run2)
-    # inference(ckpnt3, num_samples=20, num_inference_steps=1000, save_image_path=run3)
+    # # dirf.process_path(run1, dir_ok=True, file_ok=False, must_exist=False)
+    # # dirf.process_path(run2, dir_ok=True, file_ok=False, must_exist=False)
+    # dirf.process_path(run6, dir_ok=True, file_ok=False, must_exist=False)
+
+
+    # inference(ckpnt6, num_samples=20, num_inference_steps=1000, save_image_path=run6)
+    # # inference(ckpnt2, num_samples=20, num_inference_steps=1000, save_image_path=run2)
+    # # inference(ckpnt3, num_samples=20, num_inference_steps=1000, save_image_path=run3)
 
 
 

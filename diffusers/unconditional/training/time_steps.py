@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
 from abc import ABC, abstractmethod
-from typing import List, Dict, Union
+from typing import List, Dict, Union, Tuple
 
 
 class AbstractTimeStepsSampler(ABC):
@@ -10,7 +10,7 @@ class AbstractTimeStepsSampler(ABC):
         self.num_train_timesteps = num_train_timesteps
 
     @abstractmethod
-    def sample(self, batch_size: int, device: Union[torch.device, str]) -> torch.Tensor:
+    def sample(self, batch_size: int, device: Union[torch.device, str]) -> Tuple[torch.Tensor, Dict[str, float]]:
         """Sample a batch of timesteps."""
         pass
 
@@ -21,31 +21,25 @@ class AbstractTimeStepsSampler(ABC):
 
 class UniformTimeStepsSampler(AbstractTimeStepsSampler):
     """Samples timesteps uniformly."""
-    def sample(self, batch_size: int, device: Union[torch.device, str]) -> torch.Tensor:
-        return torch.randint(
+    def sample(self, batch_size: int, device: Union[torch.device, str]) -> Tuple[torch.Tensor, Dict[str, float]]:
+        timesteps = torch.randint(
             0,
             self.num_train_timesteps,
             (batch_size,),
             device=device,
             dtype=torch.int64
         )
-
-    def update(self, *args, **kwargs) -> None:
-        """
-        the uniform sampler does need to be updated
-        """
-        pass
+        return timesteps, {}
 
 
 class LogTimeStepsSampler(AbstractTimeStepsSampler):
     """Samples timesteps using a log-uniform distribution."""
-    def sample(self, batch_size: int, device: Union[torch.device, str]) -> torch.Tensor:
-        # log_min is 0 since exp(0) = 1 and we want to sample from 1 to num_train_timesteps - 1 (since 0 is the first timestep and there is no learning if the the model is asked to predict the identity function)
+    def sample(self, batch_size: int, device: Union[torch.device, str]) -> Tuple[torch.Tensor, Dict[str, float]]:
         log_min = torch.log(torch.tensor(1e-1))
         log_max = torch.log(torch.tensor(float(self.num_train_timesteps)))
         log_timesteps = torch.rand(batch_size, device=device) * (log_max - log_min) + log_min
         timesteps = torch.exp(log_timesteps).long()
-        return torch.clamp(timesteps, 1, self.num_train_timesteps - 1)
+        return torch.clamp(timesteps, 0, self.num_train_timesteps - 1), {}
 
     def update(self, *args, **kwargs) -> None:
         """The log sampler does not need to be updated."""
@@ -80,7 +74,7 @@ class CurriculumTimeStepsSampler(AbstractTimeStepsSampler):
 
         self.last_epoch_losses = {} 
 
-    def sample(self, batch_size: int, device: Union[torch.device, str]) -> torch.Tensor:
+    def sample(self, batch_size: int, device: Union[torch.device, str]) -> Tuple[torch.Tensor, Dict[str, float]]:
         """Samples timesteps based on loss distribution across active bins."""
         active_indices = list(range(self.active_bin_idx, self.num_bins))
         active_labels = [self.bin_labels[i] for i in active_indices]
@@ -88,7 +82,8 @@ class CurriculumTimeStepsSampler(AbstractTimeStepsSampler):
         active_losses = torch.tensor([self.last_epoch_losses.get(label, 1.0) for label in active_labels], device=device)
         
         bin_probabilities = F.softmax(active_losses, dim=0)
-        
+        bin_probs_log = {label: prob.item() for label, prob in zip(active_labels, bin_probabilities)}
+
         all_timestep_probs = torch.zeros(self.num_train_timesteps, device=device)
         
         max_high = float('-inf')
@@ -111,7 +106,7 @@ class CurriculumTimeStepsSampler(AbstractTimeStepsSampler):
         
         sampled_timesteps = torch.multinomial(all_timestep_probs, num_samples=batch_size, replacement=True)
         
-        return sampled_timesteps
+        return sampled_timesteps, bin_probs_log
 
 
     def update(self, loss_per_bin: Dict[str, float]) -> None:
