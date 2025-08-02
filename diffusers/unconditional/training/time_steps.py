@@ -1,4 +1,4 @@
-import torch
+import torch, numpy as np
 import torch.nn.functional as F
 from abc import ABC, abstractmethod
 from typing import List, Dict, Union, Tuple
@@ -84,6 +84,9 @@ class CurriculumTimeStepsSampler(AbstractTimeStepsSampler):
         bin_probabilities = F.softmax(active_losses, dim=0)
         bin_probs_log = {label: prob.item() for label, prob in zip(active_labels, bin_probabilities)}
 
+        if not np.isclose(sum(bin_probs_log.values()), 1):
+            raise ValueError(f"The sum of the bin probabilities is {sum(bin_probs_log.values())}, but it should be 1.0")
+
         all_timestep_probs = torch.zeros(self.num_train_timesteps, device=device)
         
         max_high = float('-inf')
@@ -104,6 +107,9 @@ class CurriculumTimeStepsSampler(AbstractTimeStepsSampler):
         if max_high != self.num_train_timesteps:
             raise ValueError(f"The highest bin boundary is {max_high} but the number of timesteps is {self.num_train_timesteps}")
         
+        if not torch.isclose(all_timestep_probs.sum(), torch.tensor(1.0, device=device)):
+            raise ValueError(f"The sum of the timestep probabilities is {all_timestep_probs.sum()}, but it should be 1.0")
+
         sampled_timesteps = torch.multinomial(all_timestep_probs, num_samples=batch_size, replacement=True)
         
         return sampled_timesteps, bin_probs_log

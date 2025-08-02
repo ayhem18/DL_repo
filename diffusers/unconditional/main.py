@@ -12,7 +12,6 @@ from mypt.visualization.general import visualize_grid
 from mypt.code_utils import directories_and_files as dirf
 
 from training.model import set_model
-from training.time_steps import set_timesteps_sampler
 from training.data import set_data, prepare_log_directory
 from training.config import ModelConfig, OptimizerConfig, TrainingConfig
 from training.unconditional_train_diffusion import train_diffusion_model
@@ -20,11 +19,12 @@ from training.unconditional_train_diffusion import train_diffusion_model
 
 def main():
     from mypt.code_utils import pytorch_utils as pu
-    pu.seed_everything(42)
     
     model_config = ModelConfig()
     opt_config = OptimizerConfig()
     train_config = TrainingConfig() 
+
+    pu.seed_everything(train_config.seed)
 
     model = set_model(model_config)
 
@@ -45,13 +45,6 @@ def main():
     # noise_scheduler = DDPMScheduler(num_train_timesteps=1000, beta_schedule="linear", beta_end=0.0015) 
 
     noise_scheduler = DDPMScheduler(num_train_timesteps=1000)
-
-    # timesteps_sampler = set_timesteps_sampler(
-    #     train_config.timesteps_sampler_type, 
-    #     noise_scheduler.config.num_train_timesteps,
-    #     bins=train_config.timestep_bins,
-    #     thresholds=train_config.loss_thresholds
-    # )
 
     # why ? no good reason, just copied from 
     # https://colab.research.google.com/github/huggingface/notebooks/blob/main/diffusers/training_example.ipynb#scrollTo=my90vVcmxU5V

@@ -1,4 +1,4 @@
-import torch
+import torch, numpy as np
 
 from tqdm import tqdm
 from torch.utils.data import DataLoader
@@ -64,10 +64,11 @@ def _compute_bin_losses(bin_boundaries: torch.Tensor,
     for i, b_idx in enumerate(bin_indices):
         label_idx = b_idx.item()
 
-        if label_idx >= len(bin_labels):
-            continue
+        if label_idx > len(bin_labels):
+            raise ValueError(f"The bin index {label_idx} is greater than the number of bins {len(bin_labels)}")
 
-        label = bin_labels[label_idx]
+        # the bin boundaries have one more element than the bin labels (so we need to keep this into account when indexing the bin labels)
+        label = bin_labels[label_idx - 1]
         train_loss_per_bin[label] += per_sample_loss[i].item()
         train_count_per_bin[label] += 1
 
@@ -195,6 +196,15 @@ def train_epoch(model: Union[DiffusionUNetOneDim, UNet2DModel],
 
         _compute_bin_losses(bin_boundaries, bin_labels, timesteps, per_sample_loss, train_loss_per_bin, train_count_per_bin)
         
+        # few sanity checks: 
+        # 1. the sum of the train_count_per_bin must be equal to the number of samples in the epoch 
+        # 2. the sum of the train_loss_per_bin must be equal to the total train loss
+        if sum(train_count_per_bin.values()) != num_train_samples:
+            raise ValueError(f"The sum of the train_count_per_bin must be equal to the number of samples in the epoch, but it is {sum(train_count_per_bin.values())} and the number of samples in the epoch is {num_train_samples}")
+
+        if not (np.isclose(sum(train_loss_per_bin.values()), total_train_loss, atol=1e-6)):
+            raise ValueError(f"The sum of the train_loss_per_bin must be equal to the total train loss, but it is {sum(train_loss_per_bin.values())} and the total train loss is {total_train_loss}")
+
 
     if debug:
         for i, (s, t, l) in enumerate(zip(debug_samples[:10], debug_samples_timesteps[:10], loss_on_debug_samples[:10])):
@@ -207,7 +217,7 @@ def train_epoch(model: Union[DiffusionUNetOneDim, UNet2DModel],
 
     # keep only the bins that have at least one sample
     avg_train_loss_per_bin = dict([(label, train_loss_per_bin[label] / train_count_per_bin[label]) for label in bin_labels if train_count_per_bin[label]])
-
+    
     return avg_loss, batch_losses, avg_train_loss_per_bin, train_count_per_bin, bin_probs_log
 
 
