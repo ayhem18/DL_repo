@@ -1,15 +1,17 @@
-import torch, numpy as np
+import torch, os,   numpy as np
 
 from tqdm import tqdm
 from torch.utils.data import DataLoader
 from typing import Any, Dict, List, Optional, Tuple, Union
 from diffusers.models.unets.unet_2d import UNet2DModel
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
+from diffusers.pipelines.ddpm import DDPMPipeline
 
 
 from mypt.shortcuts import P
 from mypt.loggers import BaseLogger
 from mypt.visualization.general import visualize
+from mypt.code_utils.checkpointing import Checkpointer
 from mypt.nets.conv_nets.diffusion_unet.wrapper.diffusion_unet1d import DiffusionUNetOneDim
 
 from training.sample import sample_diffusion_epoch       
@@ -433,11 +435,12 @@ def train_diffusion_model(model: Union[DiffusionUNetOneDim, UNet2DModel],
                timestep_bins: List[int],
                validation_timesteps: Optional[list],
                timesteps_sampler_type: str,
+               time_steps_kwargs: dict,
                val_per_epoch: int = 5,
+               checkpointing_metric: str = 'val_loss',
+               checkpointing_top_k: int = 3,
                max_grad_norm: float = 1.0,
-               debug: bool = False,
-               time_steps_kwargs: Dict[str, Any] = {}
-               ) -> Union[DiffusionUNetOneDim, UNet2DModel]:
+               debug: bool = False) -> Union[DiffusionUNetOneDim, UNet2DModel]:
     """
     Train the model and validate it periodically.
     
@@ -455,6 +458,20 @@ def train_diffusion_model(model: Union[DiffusionUNetOneDim, UNet2DModel],
     Returns:
         Trained model
     """
+
+    def save_model_fn(model, save_dir, **kwargs):
+        pipeline = DDPMPipeline(unet=model, scheduler=kwargs['scheduler'])
+        pipeline.save_pretrained(save_dir)
+
+    checkpointer = Checkpointer(
+        root_dir=os.path.join(log_dir, 'checkpoints'),
+        save_fn=save_model_fn,
+        mode='min', # Both val_loss and FID are minimized
+        top_k=checkpointing_top_k,
+        identifier_key='epoch'
+    )
+
+    best_val_loss = float('inf')
     all_train_losses = []
     all_val_losses = []
     
@@ -536,10 +553,24 @@ def train_diffusion_model(model: Union[DiffusionUNetOneDim, UNet2DModel],
             all_val_losses=all_val_losses
         )
 
+        if checkpointing_metric == 'val_loss':
+            checkpointer.save(model, val_loss, epoch, scheduler=noise_scheduler)
+
         if (epoch + 1) % val_per_epoch == 0:
             sample_diffusion_epoch(model, noise_scheduler, val_loader, device, log_dir, epoch, debug)
-
-        # TODO: add FID evaluation, general checkpointing code 
+            
+            if checkpointing_metric == 'fid':
+                fid_score = calculate_fid(
+                    model=model,
+                    noise_scheduler=noise_scheduler,
+                    val_loader=val_loader,
+                    device=device,
+                    num_val_samples=len(val_loader.dataset),
+                    epoch=epoch,
+                    log_dir=log_dir
+                )
+                logger.log_scalar('Metrics/fid_score', fid_score, epoch)
+                checkpointer.save(model, fid_score, epoch, scheduler=noise_scheduler)
 
             
     return model

@@ -55,10 +55,12 @@ class TrainingConfig(Config):
     val_batch_size: int = 16
     seed: int = 42
 
-    num_epochs: int = 5
+    num_epochs: int = 100
     val_per_epoch: int = 5
     validation_timesteps: Optional[list] = [10, 50, 100, 250, 500, 750, 999]
     timestep_bins: Optional[list] = [50, 250, 500, 1000]
-    loss_thresholds: Optional[list] = [1, 1, 1] # TODO: change back to 0.1, 0.1, 0.075
-    timesteps_sampler_type: str = "curriculum"
+    loss_thresholds: Optional[list] = [0.1, 0.1, 0.075]
+    timesteps_sampler_type: str = "uniform"
 
+    checkpointing_metric: str = "fid" # or "val_loss"
+    checkpointing_top_k: int = 3

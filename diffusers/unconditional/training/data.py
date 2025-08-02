@@ -124,7 +124,7 @@ def set_data(model_config: ModelConfig, train_config: TrainingConfig) -> Tuple[D
         raise ValueError(f"Invalid dataset type: {train_config.dataset}") 
 
 
-def prepare_log_directory() -> Path:
+def prepare_log_directory(checkpoint_tolerant: bool) -> Path:
     logs_dir = dirf.process_path(os.path.join(SCRIPT_DIR, 'runs'), dir_ok=True, file_ok=False)
 
     # iterate through each "run_*" directory and remove any folder that does not contain a '.json' file
@@ -136,7 +136,7 @@ def prepare_log_directory() -> Path:
                     run_dir = True
                     break
             
-            if not run_dir:
+            if not run_dir and not checkpoint_tolerant:
                 shutil.rmtree(os.path.join(logs_dir, r))
 
     exp_log_dir = dirf.process_path(os.path.join(logs_dir, f'run_{len(os.listdir(logs_dir)) + 1}'), dir_ok=True, file_ok=False)

@@ -8,17 +8,19 @@ from diffusers.optimization import get_cosine_schedule_with_warmup
 
 from mypt.shortcuts import P
 from mypt.loggers import get_logger
+from mypt.code_utils import pytorch_utils as pu
 from mypt.visualization.general import visualize_grid
-from mypt.code_utils import directories_and_files as dirf
+from mypt.data.dataloaders.standard_dataloaders import initialize_val_dataloader
+from torch.utils.data import DataLoader
 
 from training.model import set_model
+from training.evaluation import evaluate_diffusion_model
 from training.data import set_data, prepare_log_directory
 from training.config import ModelConfig, OptimizerConfig, TrainingConfig
 from training.unconditional_train_diffusion import train_diffusion_model
+    
 
-
-def main():
-    from mypt.code_utils import pytorch_utils as pu
+def main(checkpoint_tolerant: bool = False):
     
     model_config = ModelConfig()
     opt_config = OptimizerConfig()
@@ -33,12 +35,12 @@ def main():
     train_loader, val_loader = set_data(model_config, train_config)
 
     # Define loss function and optimizer
-    criterion = torch.nn.MSELoss()
+    criterion = torch.nn.MSELoss()  
     optimizer = torch.optim.AdamW(model.parameters(), lr=opt_config.learning_rate)
 
 
     # Initialize TensorBoard writer
-    exp_log_dir = prepare_log_directory()
+    exp_log_dir = prepare_log_directory(checkpoint_tolerant)
     logger = get_logger('tensorboard', log_dir=os.path.join(exp_log_dir, 'logs'))
 
     # TODO: I need to better understand the strategies of setting the noise scheduler parameters.
@@ -46,8 +48,6 @@ def main():
 
     noise_scheduler = DDPMScheduler(num_train_timesteps=1000)
 
-    # why ? no good reason, just copied from 
-    # https://colab.research.google.com/github/huggingface/notebooks/blob/main/diffusers/training_example.ipynb#scrollTo=my90vVcmxU5V
     training_steps = (len(train_loader) * train_config.num_epochs)
 
     lr_scheduler = get_cosine_schedule_with_warmup(
@@ -83,14 +83,8 @@ def main():
         }
     )
     
-    # save the model in a way that can be loaded by the diffusers library
-    if isinstance (trained_model, UNet2DModel):
-        pipeline = DDPMPipeline(unet=trained_model, scheduler=noise_scheduler)
-        pipeline.save_pretrained(os.path.join(exp_log_dir, 'model')) 
+    # save the model in a way that can be loaded by the difrom mypt.code_utils import pytorch_utils as pu
 
-    else:
-        # TODO: save my custom model
-        pass
 
     # Save the config
     model_config.save(os.path.join(exp_log_dir, 'model_config.json'))
@@ -114,11 +108,52 @@ def inference(folder_path: P, num_samples: int = 20, save_image_path: P = None, 
 
     return images
 
-if __name__ == '__main__':
-    main()
 
-    # script_dir = os.path.dirname(os.path.abspath(__file__))
-    # runs_dir = os.path.join(script_dir, 'training', 'runs')
+
+def evaluate(model_path: P, val_loader: DataLoader, metrics_dir: P, num_inference_steps: int = 1000):
+    device = pu.get_default_device()
+
+    # load the model and the noise scheduler
+    model = UNet2DModel.from_pretrained(os.path.join(model_path, "unet"))
+    noise_scheduler = DDPMScheduler.from_pretrained(os.path.join(model_path, "scheduler"))
+
+    sampled_dir = os.path.join(metrics_dir, "sampled")
+    real_dir = os.path.join(metrics_dir, "real")
+
+    metrics_dict = evaluate_diffusion_model(
+        model=model,
+        noise_scheduler=noise_scheduler,
+        device=device,
+        val_loader=val_loader,
+        num_inference_steps=num_inference_steps,
+        sampled_dir=sampled_dir,
+        real_dir=real_dir
+    )
+
+    return metrics_dict
+
+
+
+if __name__ == '__main__':
+    # main(checkpoint_tolerant=True)
+
+
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    runs_dir = os.path.join(script_dir, 'training', 'runs')
+
+    ckpnt = os.path.join(runs_dir, 'run_7', 'model')
+    metrics_dir = os.path.join(runs_dir, 'run_7', 'metrics')
+
+    model_config = ModelConfig()
+    train_config = TrainingConfig()
+
+    model_config.dataset = "butterflies" 
+    train_config.val_batch_size = 100
+
+    _, val_loader = set_data(model_config, train_config)
+
+    evaluate(ckpnt, val_loader, metrics_dir, num_inference_steps=10)
+
     # # run1, ckpnt1 = os.path.join(runs_dir, 'run_1', 'inference'), os.path.join(runs_dir, 'run_1', 'model')
     # # run2, ckpnt2 = os.path.join(runs_dir, 'run_2', 'inference'), os.path.join(runs_dir, 'run_2', 'model')
     # # run3, ckpnt3 = os.path.join(runs_dir, 'run_3', 'inference'), os.path.join(runs_dir, 'run_3', 'model')
