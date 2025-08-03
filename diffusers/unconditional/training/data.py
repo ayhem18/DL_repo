@@ -1,10 +1,11 @@
 import os
+import torch
 import shutil
 import numpy as np
 import albumentations as A
 
 from pathlib import Path
-from typing import Tuple, Union
+from typing import Callable, List, Optional, Tuple
 from datasets import load_dataset
 from torch.utils.data import Dataset, DataLoader
 
@@ -27,23 +28,49 @@ while 'data' not in os.listdir(current_dir):
 DATA_DIR = os.path.join(current_dir, 'data') 
 
 
+def prepare_tensor_for_metrics(tensor: torch.Tensor) -> torch.Tensor:
+    if not ((tensor.max() <= 1 and tensor.min() >= 0) or (tensor.max() <= 255 and tensor.min() >= 0)):
+        raise ValueError(f"The tensor must be in the range [0, 1] or [0, 255]. Found: {tensor.max()} and {tensor.min()}")
+    
+
+    # the calculate_metrics function expects a dataset object whose items a torch.tensor with dtype uint8
+    # if the tensor is in the range [0, 1], convert it to [0, 255]
+    if tensor.max() <= 1:
+        tensor = tensor * 255
+
+    t = tensor.to(torch.uint8)
+    return t
+
+
 class HuggingFaceDatasetWrapper(Dataset):
-    def __init__(self, dataset, transforms):
-        self.dataset = dataset
-        self.transforms = transforms
+    def __init__(self, 
+        dataset: Dataset, 
+        image_transforms: List,
+        item_transforms: Optional[Callable[[torch.Tensor], torch.Tensor]] = None,
+        ):
+        self.dataset = dataset        
+        self.image_transforms = image_transforms
+        self.item_transforms = item_transforms
         
     def __len__(self):
-        return len(self.dataset)
+        return 100 # TODO: remove this
+        # return len(self.dataset)
         
     def __getitem__(self, idx):
         image = self.dataset[idx]["image"].convert("RGB")
-        transformed = self.transforms(image=np.asarray(image))
+        transformed = self.image_transforms(image=np.asarray(image))
         res = transformed["image"]
+
+        if self.item_transforms is not None:
+            res = self.item_transforms(res)
 
         return res
 
 
-def set_butterfiles_dataset(model_config: ModelConfig, train_config: TrainingConfig) -> Tuple[DataLoader, DataLoader]:
+
+def set_butterfiles_dataset(model_config: ModelConfig, 
+                    train_config: TrainingConfig, 
+                    item_transforms: Optional[Callable[[torch.Tensor], torch.Tensor]] = None) -> Tuple[DataLoader, DataLoader]:
 
     dataset_name = "huggan/smithsonian_butterflies_subset"
     train_ds = load_dataset(dataset_name, split="train[:95%]")    
@@ -58,11 +85,11 @@ def set_butterfiles_dataset(model_config: ModelConfig, train_config: TrainingCon
         A.Resize(height=model_config.input_shape[1], width=model_config.input_shape[2]),
         A.ToTensorV2()
     ])
-    
-            
+        
+
     # Apply transformations
-    train_ds_transformed = HuggingFaceDatasetWrapper(train_ds, train_transforms)
-    val_ds_transformed = HuggingFaceDatasetWrapper(val_ds, val_transforms)
+    train_ds_transformed = HuggingFaceDatasetWrapper(train_ds, train_transforms, item_transforms=item_transforms)
+    val_ds_transformed = HuggingFaceDatasetWrapper(val_ds, val_transforms, item_transforms=item_transforms)
     
     train_loader = initialize_train_dataloader(train_ds_transformed, seed=42, batch_size=train_config.train_batch_size, num_workers=3, drop_last=True)
     val_loader = initialize_val_dataloader(val_ds_transformed, seed=42, batch_size=train_config.val_batch_size, num_workers=3)
@@ -109,15 +136,12 @@ def set_mnist_dataset(model_config: ModelConfig,
     train_loader = initialize_train_dataloader(train_ds, seed=42, batch_size=train_config.train_batch_size, num_workers=3, drop_last=True)
     val_loader = initialize_val_dataloader(val_ds, seed=42, batch_size=train_config.val_batch_size, num_workers=3)
 
-    # if return_datasets:
-    #     return train_loader, val_loader, train_ds, val_ds
-
     return train_loader, val_loader
 
 
-def set_data(model_config: ModelConfig, train_config: TrainingConfig) -> Tuple[DataLoader, DataLoader]:
+def set_data(model_config: ModelConfig, train_config: TrainingConfig, item_transforms: Optional[Callable[[torch.Tensor], torch.Tensor]] = None) -> Tuple[DataLoader, DataLoader]:
     if train_config.dataset == "butterflies":
-        return set_butterfiles_dataset(model_config, train_config)
+        return set_butterfiles_dataset(model_config, train_config, item_transforms)
     elif train_config.dataset == "mnist":
         return set_mnist_dataset(model_config, train_config)
     else:

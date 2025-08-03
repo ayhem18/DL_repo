@@ -1,7 +1,7 @@
 import os, torch, shutil
 
 from PIL import Image
-from typing import Union
+from typing import Union, Dict
 from torch.utils.data import DataLoader
 from torch_fidelity import calculate_metrics
 from diffusers.models.unets.unet_2d import UNet2DModel
@@ -9,82 +9,67 @@ from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 
 from mypt.shortcuts import P
 from mypt.code_utils import directories_and_files as dirf
+from mypt.data.datasets.genericFolderDs import GenericFolderDS
 from mypt.code_utils.image_processing.to_numpy import to_displayable_np
 from mypt.nets.conv_nets.diffusion_unet.wrapper.diffusion_unet1d import DiffusionUNetOneDim
 
+from training.data import prepare_tensor_for_metrics    
 from training.sample import sample_from_diffusion_model
+
+
 
 def evaluate_diffusion_model(
     model: Union[UNet2DModel, DiffusionUNetOneDim],
     noise_scheduler: DDPMScheduler,
     val_loader: DataLoader,
     sampled_dir: P,
-    real_dir: P,
     num_inference_steps: int,
     device: torch.device,
     remove_sampled_dir: bool = True,
-) -> float: 
+) -> Dict[str, float]: 
 
     sampled_dir = dirf.process_path(sampled_dir, dir_ok=True, file_ok=False, must_exist=False)
-    real_dir = dirf.process_path(real_dir, dir_ok=True, file_ok=False, must_exist=False)
-
-    # scale if necessary
-    real_images = next(iter(val_loader)) 
-
-    # move to cpu
-    real_images = real_images.cpu()
-
-    for i, r in enumerate(real_images):
-        if r.max() <= 1:
-            r = (r * 255).to(torch.uint8) 
     
-        # convert to a proper numpy
-        r = to_displayable_np(r)
+    # Get properties from the validation set
+    num_total_samples = len(val_loader.dataset)
+    image_shape = val_loader.dataset[0].shape
 
-        # save the image
-        Image.fromarray(r).save(os.path.join(real_dir, f"sample_{i}.png"))
+    samples_generated = 0
+    with torch.no_grad():
+        for i in range(0, num_total_samples, val_loader.batch_size):
+            batch_size = min(val_loader.batch_size, num_total_samples - i)
+            
+            shape_for_batch = (batch_size, *image_shape[1:])
+            
+            samples, scale_images = sample_from_diffusion_model(
+                model, noise_scheduler, device, shape_for_batch, batch_size, num_inference_steps
+            )
 
-    # extract the shape and the number of samples from the real images
-    shape = real_images.shape
-    num_samples = real_images.shape[0]
+            samples = samples.cpu()
 
-    # sample from the model
-    samples, scale_images = sample_from_diffusion_model(model, noise_scheduler, device, shape, num_samples, num_inference_steps)
+            for j, s in enumerate(samples):
+                if scale_images:
+                    s = (s + 1) * 127.5
+                
+                s = to_displayable_np(s)
+                Image.fromarray(s).save(os.path.join(sampled_dir, f"sample_{samples_generated + j}.png"))
+            
+            samples_generated += batch_size
+            
+    sampled_ds = GenericFolderDS(sampled_dir, [], item_transforms=prepare_tensor_for_metrics)
 
-    # move to cpu
-    samples = samples.cpu()
-
-    for i, s in enumerate(samples):
-        if scale_images:
-            s = (s + 1) * 127.5
-        else:
-            s = s 
-        
-        # convert to a proper numpy
-        s = to_displayable_np(s)
-
-        # save the image
-        Image.fromarray(s).save(os.path.join(sampled_dir, f"sample_{i}.png"))
-
-
-
-    # at this point calculate the scores
     metrics_dict = calculate_metrics(
-        input1=sampled_dir,
-        input2=real_dir,
+        input1=sampled_ds,
+        input2=val_loader.dataset,
         cuda=True,
         isc=False,
         fid=True,
         kid=True,
-        verbose=True,
+        verbose=False,
     )
-
     
     if remove_sampled_dir:
         shutil.rmtree(sampled_dir)
-
-    # remove the real directory anyway
-    shutil.rmtree(real_dir)
 
     return metrics_dict
 

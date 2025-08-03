@@ -1,6 +1,6 @@
-import json
+import json, torch
 
-from typing import List, Tuple, Optional
+from typing import Tuple, Optional
 from dataclasses import asdict, dataclass
 
 from mypt.shortcuts import P
@@ -53,7 +53,10 @@ class TrainingConfig(Config):
     dataset: str = "butterflies"
     train_batch_size: int = 64
     val_batch_size: int = 16
-    seed: int = 42
+    seed: int = 42,
+
+    dtype: torch.dtype = torch.uint8
+    
 
     num_epochs: int = 100
     val_per_epoch: int = 5

@@ -1,6 +1,7 @@
 import os
 import torch
 
+from torch.utils.data import DataLoader
 from diffusers.models.unets.unet_2d import UNet2DModel
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
 from diffusers.pipelines.ddpm.pipeline_ddpm import DDPMPipeline
@@ -10,14 +11,12 @@ from mypt.shortcuts import P
 from mypt.loggers import get_logger
 from mypt.code_utils import pytorch_utils as pu
 from mypt.visualization.general import visualize_grid
-from mypt.data.dataloaders.standard_dataloaders import initialize_val_dataloader
-from torch.utils.data import DataLoader
 
 from training.model import set_model
 from training.evaluation import evaluate_diffusion_model
-from training.data import set_data, prepare_log_directory
 from training.config import ModelConfig, OptimizerConfig, TrainingConfig
 from training.unconditional_train_diffusion import train_diffusion_model
+from training.data import set_data, prepare_log_directory, prepare_tensor_for_metrics
     
 
 def main(checkpoint_tolerant: bool = False):
@@ -83,9 +82,6 @@ def main(checkpoint_tolerant: bool = False):
         }
     )
     
-    # save the model in a way that can be loaded by the difrom mypt.code_utils import pytorch_utils as pu
-
-
     # Save the config
     model_config.save(os.path.join(exp_log_dir, 'model_config.json'))
     opt_config.save(os.path.join(exp_log_dir, 'opt_config.json'))
@@ -118,7 +114,6 @@ def evaluate(model_path: P, val_loader: DataLoader, metrics_dir: P, num_inferenc
     noise_scheduler = DDPMScheduler.from_pretrained(os.path.join(model_path, "scheduler"))
 
     sampled_dir = os.path.join(metrics_dir, "sampled")
-    real_dir = os.path.join(metrics_dir, "real")
 
     metrics_dict = evaluate_diffusion_model(
         model=model,
@@ -127,9 +122,10 @@ def evaluate(model_path: P, val_loader: DataLoader, metrics_dir: P, num_inferenc
         val_loader=val_loader,
         num_inference_steps=num_inference_steps,
         sampled_dir=sampled_dir,
-        real_dir=real_dir
+        remove_sampled_dir=False
     )
 
+    print("Evaluation metrics:", metrics_dict)
     return metrics_dict
 
 
@@ -148,9 +144,9 @@ if __name__ == '__main__':
     train_config = TrainingConfig()
 
     model_config.dataset = "butterflies" 
-    train_config.val_batch_size = 100
+    train_config.val_batch_size = 400
 
-    _, val_loader = set_data(model_config, train_config)
+    _, val_loader = set_data(model_config, train_config, item_transforms=prepare_tensor_for_metrics)
 
     evaluate(ckpnt, val_loader, metrics_dir, num_inference_steps=10)
 
