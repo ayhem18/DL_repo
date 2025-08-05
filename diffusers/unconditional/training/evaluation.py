@@ -62,12 +62,19 @@ def evaluate_diffusion_model(
         input1=sampled_ds,
         input2=val_loader.dataset,
         cuda=True,
-        isc=False,
+        isc=True,
         fid=True,
         kid=True,
         verbose=False,
+        kid_subset_size=len(sampled_ds)
     )
+
+    # round the results
+    metrics_dict = {k: round(v, 6) for k, v in metrics_dict.items()}
     
+    # add the number of inference steps to the metrics dict
+    metrics_dict["num_inference_steps"] = num_inference_steps
+
     if remove_sampled_dir:
         shutil.rmtree(sampled_dir)
 

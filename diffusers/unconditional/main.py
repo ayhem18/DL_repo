@@ -1,5 +1,4 @@
-import os
-import torch
+import os, json, torch
 
 from torch.utils.data import DataLoader
 from diffusers.models.unets.unet_2d import UNet2DModel
@@ -106,7 +105,7 @@ def inference(folder_path: P, num_samples: int = 20, save_image_path: P = None, 
 
 
 
-def evaluate(model_path: P, val_loader: DataLoader, metrics_dir: P, num_inference_steps: int = 1000):
+def evaluate(model_path: P, loader: DataLoader, metrics_dir: P, num_inference_steps: int = 1000):
     device = pu.get_default_device()
 
     # load the model and the noise scheduler
@@ -119,36 +118,54 @@ def evaluate(model_path: P, val_loader: DataLoader, metrics_dir: P, num_inferenc
         model=model,
         noise_scheduler=noise_scheduler,
         device=device,
-        val_loader=val_loader,
+        val_loader=loader,
         num_inference_steps=num_inference_steps,
         sampled_dir=sampled_dir,
         remove_sampled_dir=False
     )
 
-    print("Evaluation metrics:", metrics_dict)
+    # round the results
+    # save the metrics dict to a json file
+    with open(os.path.join(metrics_dir, "metrics.json"), "w") as f:
+        json.dump(metrics_dict, f, indent=4)
+
     return metrics_dict
 
 
 
 if __name__ == '__main__':
-    # main(checkpoint_tolerant=True)
+    main(checkpoint_tolerant=True)
+
+    # script_dir = os.path.dirname(os.path.abspath(__file__))
+    # runs_dir = os.path.join(script_dir, 'training', 'runs')
+
+    # ckpnt7 = os.path.join(runs_dir, 'run_7', 'model')
+    # metrics_dir7 = os.path.join(runs_dir, 'run_7', 'metrics')
+
+    # model_config = ModelConfig()
+    # train_config = TrainingConfig()
+
+    # model_config.dataset = "butterflies" 
+    # train_config.val_batch_size = 400
+
+    # train_loader, _ = set_data(model_config, train_config, item_transforms=prepare_tensor_for_metrics)
+
+    # # evaluate(ckpnt7, train_loader, metrics_dir7, num_inference_steps=1000)
+
+    # ckpnt8 = os.path.join(runs_dir, 'run_8', 'model')
+    # metrics_dir8 = os.path.join(runs_dir, 'run_8', 'metrics')
+    # evaluate(ckpnt8, train_loader, metrics_dir8, num_inference_steps=1000)
 
 
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    runs_dir = os.path.join(script_dir, 'training', 'runs')
+    # d = os.path.join(runs_dir, 'run_7', 'metrics', 'sampled')
 
-    ckpnt = os.path.join(runs_dir, 'run_7', 'model')
-    metrics_dir = os.path.join(runs_dir, 'run_7', 'metrics')
+    # ds = GenericFolderDS(d, image_transforms=[], item_transforms=prepare_tensor_for_metrics)
 
-    model_config = ModelConfig()
-    train_config = TrainingConfig()
+    # imgs = [ds[i] for i in range(10)]
 
-    model_config.dataset = "butterflies" 
-    train_config.val_batch_size = 400
+    # visualize_grid(imgs, title="sampled_images")
 
-    _, val_loader = set_data(model_config, train_config, item_transforms=prepare_tensor_for_metrics)
 
-    evaluate(ckpnt, val_loader, metrics_dir, num_inference_steps=10)
 
     # # run1, ckpnt1 = os.path.join(runs_dir, 'run_1', 'inference'), os.path.join(runs_dir, 'run_1', 'model')
     # # run2, ckpnt2 = os.path.join(runs_dir, 'run_2', 'inference'), os.path.join(runs_dir, 'run_2', 'model')

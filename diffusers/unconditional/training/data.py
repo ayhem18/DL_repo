@@ -53,8 +53,7 @@ class HuggingFaceDatasetWrapper(Dataset):
         self.item_transforms = item_transforms
         
     def __len__(self):
-        return 100 # TODO: remove this
-        # return len(self.dataset)
+        return len(self.dataset)
         
     def __getitem__(self, idx):
         image = self.dataset[idx]["image"].convert("RGB")
